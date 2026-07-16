@@ -1,6 +1,8 @@
 """
 consistency_engine/consistency_engine.py
 ==========================================
+
+
 """
 
 import difflib
@@ -35,7 +37,6 @@ WEIGHTS = {
 
 
 class ConsistencyEngine:
-    
 
     def compare_screenshots(self, browser_png_path: str, sandbox_png_path: str) -> dict:
         try:
@@ -44,7 +45,11 @@ class ConsistencyEngine:
             logger.exception("Screenshot comparison failed")
             similarity = 0.0
 
-        return {"similarity": similarity, "method": "phash" if _HAS_IMAGEHASH else "pixel_diff"}
+        return {
+            "similarity": similarity,
+            "method": "phash" if _HAS_IMAGEHASH else "pixel_diff",
+            "indeterminate": False,  # screenshots are always real captured pixels, never placeholder
+        }
 
     def _compare_images(self, path_a: str, path_b: str) -> float:
         if _HAS_IMAGEHASH:
@@ -66,11 +71,21 @@ class ConsistencyEngine:
             logger.exception("Sandbox OCR extraction failed")
             sandbox_ocr_text = ""
 
+        browser_stripped = (browser_ocr_text or "").strip()
+        sandbox_stripped = (sandbox_ocr_text or "").strip()
+
+
+        indeterminate = not browser_stripped and not sandbox_stripped
+
         similarity = difflib.SequenceMatcher(
-            None, (browser_ocr_text or "").strip(), (sandbox_ocr_text or "").strip()
+            None, browser_stripped, sandbox_stripped
         ).ratio()
 
-        return {"similarity": similarity, "sandbox_ocr_text": sandbox_ocr_text}
+        return {
+            "similarity": similarity,
+            "sandbox_ocr_text": sandbox_ocr_text,
+            "indeterminate": indeterminate,
+        }
 
     def compare_dom(self, browser_dom: dict, sandbox_html_path: str) -> dict:
         try:
@@ -80,7 +95,7 @@ class ConsistencyEngine:
             sandbox_dom = {}
 
         similarity = self._compare_dicts(browser_dom or {}, sandbox_dom)
-        return {"similarity": similarity, "sandbox_dom": sandbox_dom}
+        return {"similarity": similarity, "sandbox_dom": sandbox_dom, "indeterminate": False}
 
     def _compare_dicts(self, dict_a: dict, dict_b: dict) -> float:
         keys = set(dict_a.keys()) | set(dict_b.keys())
@@ -118,6 +133,7 @@ class ConsistencyEngine:
             "similarity": similarity,
             "title_similarity": title_similarity,
             "final_url_match": bool(url_match),
+            "indeterminate": False,
         }
 
     def compare_logo(self, browser_vision: dict, sandbox_png_path: str) -> dict:
@@ -130,7 +146,13 @@ class ConsistencyEngine:
         browser_brand = self._logo_signature(browser_vision)
         sandbox_brand = self._logo_signature(sandbox_vision)
 
-        if browser_brand is None and sandbox_brand is None:
+        # Same reasoning as compare_ocr: both-None is ambiguous between
+        # "neither page has a detectable logo" and "vision.py is a
+        # placeholder that always returns None" -- indeterminate rather
+        # than a confident match.
+        indeterminate = browser_brand is None and sandbox_brand is None
+
+        if indeterminate:
             similarity = 1.0
         elif browser_brand == sandbox_brand:
             similarity = 1.0
@@ -141,6 +163,7 @@ class ConsistencyEngine:
             "similarity": similarity,
             "browser_brand": browser_brand,
             "sandbox_brand": sandbox_brand,
+            "indeterminate": indeterminate,
         }
 
     def _logo_signature(self, vision_result: dict) -> Optional[str]:
@@ -148,12 +171,37 @@ class ConsistencyEngine:
         return logo.get("brand")
 
     def generate_consistency_report(self, comparisons: dict) -> dict:
-        overall_score = sum(
-            comparisons[name]["similarity"] * weight for name, weight in WEIGHTS.items()
-        )
+        # Dynamically drop the weight of any comparison flagged
+        # indeterminate FOR THIS SCAN, renormalizing the rest so they
+        # still sum to 1.0. A category stops being droppable the moment
+        # its underlying extractor (ocr.py / vision.py) returns real,
+        # non-empty output -- no static config to update later.
+        active_weights = {
+            name: weight
+            for name, weight in WEIGHTS.items()
+            if not comparisons[name].get("indeterminate", False)
+        }
+        indeterminate_categories = [
+            name for name in WEIGHTS if comparisons[name].get("indeterminate", False)
+        ]
+
+        if not active_weights:
+            # Everything indeterminate (e.g. both OCR and vision are
+            # placeholders AND this particular page had no meaningful
+            # DOM/metadata differences either) -- report as fully
+            # low-confidence rather than dividing by zero.
+            overall_score = comparisons["screenshot"]["similarity"]
+            reduced_confidence = True
+        else:
+            weight_sum = sum(active_weights.values())
+            overall_score = sum(
+                comparisons[name]["similarity"] * (weight / weight_sum)
+                for name, weight in active_weights.items()
+            )
+            reduced_confidence = bool(indeterminate_categories)
 
         mismatches = [
-            name for name, weight in WEIGHTS.items()
+            name for name in active_weights
             if comparisons[name]["similarity"] < MISMATCH_THRESHOLD
         ]
 
@@ -166,6 +214,12 @@ class ConsistencyEngine:
             "comparisons": comparisons,
             "mismatches": mismatches,
             "cloaking_suspected": cloaking_suspected,
+            # New fields -- surfaced so risk_fusion.py / a future
+            # dashboard can flag "this score is based on partial data"
+            # rather than presenting it as equally reliable to a
+            # fully-populated comparison.
+            "reduced_confidence": reduced_confidence,
+            "indeterminate_categories": indeterminate_categories,
         }
 
     def analyze(self, browser_artifacts: dict, sandbox_artifacts: dict) -> dict:

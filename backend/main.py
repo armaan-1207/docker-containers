@@ -13,9 +13,19 @@ from schemas.responses import HealthCheckResponse
 from websocket.websocket_manager import websocket_manager
 
 
+# SECURITY: Swagger/ReDoc/openapi.json were previously proxied by nginx
+# unconditionally with no auth (see nginx.conf's /docs, /redoc,
+# /openapi.json blocks) -- a full API schema disclosure to anyone who
+# found the path. FastAPI itself now refuses to serve them unless
+# DEBUG=True, so nginx's proxy_pass for those routes 404s in
+# production regardless of nginx-side config. Leave DEBUG=False in
+# production backend/.env; flip to True only for local dev.
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
 
@@ -29,13 +39,6 @@ def root() -> HealthCheckResponse:
 
 
 def _authenticate_ws_token(token: Optional[str]) -> Optional[str]:
-    """
-    Decodes a JWT passed as a WS query param (?token=...) — the browser
-    WebSocket API can't set an Authorization header, so the token has to
-    travel some other way; a query param is the standard workaround.
-    Returns the user_id (the token's `sub` claim), or None if the token
-    is missing, malformed, or expired.
-    """
     if not token:
         return None
     try:
@@ -53,9 +56,6 @@ async def ws_scan(websocket: WebSocket, scan_id: str):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    # Ownership check -- without this, anyone holding a valid token (for
-    # ANY account) could subscribe to ANY scan_id and watch its live
-    # risk updates stream in, just by guessing/enumerating IDs.
     with get_db_session() as db:
         scan = db.query(Scan).filter(Scan.id == scan_id).first()
         owner_id = scan.user_id if scan else None
@@ -67,7 +67,7 @@ async def ws_scan(websocket: WebSocket, scan_id: str):
     await websocket_manager.connect_browser(scan_id, websocket)
     try:
         while True:
-            await websocket.receive_text()  # keep the connection alive
+            await websocket.receive_text()
     except WebSocketDisconnect:
         websocket_manager.disconnect_browser(scan_id)
 
@@ -77,7 +77,6 @@ async def ws_user(websocket: WebSocket, user_id: str):
     token = websocket.query_params.get("token")
     authenticated_user_id = _authenticate_ws_token(token)
 
-    # A user may only subscribe to their OWN dashboard channel.
     if authenticated_user_id is None or authenticated_user_id != user_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return

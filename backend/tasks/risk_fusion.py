@@ -2,19 +2,7 @@
 tasks/risk_fusion.py
 =========================
 
-PATCH NOTES (asyncio.run safety fix):
-  _push_websocket_update previously called asyncio.run(...) directly
-  from inside a synchronous Celery task body. This works today because
-  Celery's default prefork worker pool runs each task in a plain OS
-  process/thread with no event loop already running, so asyncio.run()
-  finds nothing to conflict with -- but it's a latent landmine: switch
-  this worker to --pool=gevent/eventlet, or ever call this function
-  from inside another async context (e.g. a future async task runner),
-  and asyncio.run() raises "RuntimeError: asyncio.run() cannot be
-  called from a running event loop" immediately. Replaced with a
-  small helper that reuses a loop if one is already running in this
-  thread and only creates a fresh one if not -- safe under both the
-  current prefork setup and a future async-aware one.
+
 """
 
 import asyncio
@@ -183,8 +171,15 @@ def risk_fusion_task(self, scan_id: str):
     )
     _mark_status(scan_id, "risk_fusion_done")
 
-    if risk_report.get("severity") in ALERT_SEVERITIES:
+    is_placeholder = risk_report.get("is_placeholder", True)  # fail closed: unknown -> treat as placeholder
+    if risk_report.get("severity") in ALERT_SEVERITIES and not is_placeholder:
         from tasks.alert_pipeline import alert_pipeline_task
         alert_pipeline_task.delay(scan_id, risk_report)
+    elif risk_report.get("severity") in ALERT_SEVERITIES and is_placeholder:
+        logger.info(
+            "[%s] severity=%s but is_placeholder=True -- suppressing alert_pipeline "
+            "dispatch (no Incident row, no Slack) until the real model is wired in",
+            scan_id, risk_report.get("severity"),
+        )
 
     return {"scan_id": scan_id, "status": "risk_fusion_done", "severity": risk_report.get("severity")}

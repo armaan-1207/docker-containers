@@ -103,12 +103,13 @@ services:
       --appendonly no
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     networks:
       - aegis_net
     expose:
       - "6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -124,11 +125,12 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres_root_pass
+      POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:?POSTGRES_ROOT_PASSWORD must be set in .env}
       POSTGRES_DB: postgres
+      AEGIS_DB_PASSWORD: ${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./postgres/init.sh:/docker-entrypoint-initdb.d/01_init.sh:ro
     networks:
       - aegis_net
     expose:
@@ -160,17 +162,12 @@ services:
       --hostname=worker@%h
     volumes:
       - shared_scans:/shared/scans
-      # Docker socket — worker spawns sandbox containers (Option A).
-      # SECURITY NOTE: the ":ro" flag below only stops this container from
-      # replacing/unlinking the socket file itself — it does NOT restrict
-      # what commands can be issued over the socket. A compromised worker
-      # still has full host-level Docker control via this mount (create,
-      # exec, mount arbitrary volumes, etc). Treat this as equivalent to
-      # root-on-host access. Before production: replace this raw mount
-      # with a scoped Docker API proxy (e.g. Tecnativa/docker-socket-proxy)
-      # that only allows the specific `docker run` calls sandbox_analysis.py
-      # actually needs — see sandbox/DOCKER_ARCHITECTURE_IDEATION.md's
-      # Option A tradeoffs section, which already flags this correctly.
+      # SECURITY NOTE (unchanged from before — still open, see
+      # SECURITY_REVIEW.md Critical #4): the ":ro" flag only stops this
+      # container from replacing/unlinking the socket file itself — it
+      # does NOT restrict what commands can be issued over the socket.
+      # Still on the priority list to replace with a scoped Docker API
+      # proxy (Tecnativa/docker-socket-proxy).
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:
       test: ["CMD-SHELL", "celery -A celery_worker inspect ping --timeout 5 2>&1 | grep -c pong || exit 1"]
