@@ -1,0 +1,246 @@
+name: Security CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  security-events: write   # required for SARIF upload to the Security tab
+
+jobs:
+
+  # ------------------------------------------------------------------
+  # 1. Compose validate — cheapest, fastest job; fail fast on syntax
+  #    errors, missing required env vars, or invalid image refs
+  #    (this is exactly the class of bug fixed in this pass).
+  # ------------------------------------------------------------------
+  compose-validate:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write dummy .env files (compose config only checks structure)
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_ROOT_PASSWORD=ci-placeholder-not-real-32chars-min
+          AEGIS_DB_PASSWORD=ci-placeholder-not-real-32chars-min
+          REDIS_PASSWORD=ci-placeholder-not-real-32chars-min
+          LOG_LEVEL=INFO
+          EOF
+          mkdir -p backend
+          cat > backend/.env <<'EOF'
+          SECRET_KEY=ci-placeholder-not-real-32-characters-min
+          DATABASE_URL=postgresql+psycopg2://aegis_user:x@postgres:5432/aegis_db
+          REDIS_URL=redis://redis:6379/0
+          EOF
+
+      - name: docker compose config --quiet
+        run: docker compose config --quiet
+
+  # ------------------------------------------------------------------
+  # 2. Dependency vulnerability scanning (DEVSECOPS_TODO #6)
+  # ------------------------------------------------------------------
+  dependency-scan:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            path: backend/requirements.txt
+          - name: sandbox
+            path: sandbox/docker/requirements.txt
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit ${{ matrix.name }} requirements
+        # continue-on-error: true   # <- DEVSECOPS_TODO #D: flip during soft-launch triage week
+        run: |
+          pip-audit -r ${{ matrix.path }} -f json -o pip-audit-${{ matrix.name }}.json || true
+          pip-audit -r ${{ matrix.path }}
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-${{ matrix.name }}
+          path: pip-audit-${{ matrix.name }}.json
+
+  # ------------------------------------------------------------------
+  # 3. SAST — bandit (Python-specific) + semgrep (broader coverage)
+  #    (DEVSECOPS_TODO #7)
+  # ------------------------------------------------------------------
+  sast:
+    name: SAST (bandit + semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bandit
+        run: pip install bandit
+
+      - name: Run bandit (backend + sandbox source)
+        # continue-on-error: true   # <- DEVSECOPS_TODO #D
+        run: |
+          bandit -r backend sandbox/backend -f json -o bandit-report.json -ll || true
+          bandit -r backend sandbox/backend -ll
+
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+      - name: Run semgrep
+        # semgrep/semgrep-action (and the older returntocorp/semgrep-action)
+        # is deprecated by Semgrep's own marketplace listing and its input
+        # schema doesn't match what a previous version of this file used
+        # (`generateSarif` isn't a real input on the current action).
+        # Semgrep's own current guidance is to run the CLI directly via
+        # their maintained container image instead of a wrapper action.
+        uses: docker://semgrep/semgrep:latest
+        # continue-on-error: true   # <- DEVSECOPS_TODO #D
+        with:
+          entrypoint: semgrep
+          args: >-
+            scan
+            --config p/security-audit
+            --config p/python
+            --config p/secrets
+            --sarif
+            --output semgrep.sarif
+            .
+        env:
+          SEMGREP_SEND_METRICS: "off"
+
+      - name: Upload semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  # ------------------------------------------------------------------
+  # 4. Secret scanning (DEVSECOPS_TODO #9)
+  #    .env is gitignored, but history/PR diffs can still leak secrets
+  #    (e.g. someone pastes a real key into a commit message or an old
+  #    commit before .gitignore existed). gitleaks scans the full repo
+  #    history on push to main, and just the PR diff on pull_request.
+  # ------------------------------------------------------------------
+  secret-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history — gitleaks needs this to scan past commits
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        # continue-on-error: true   # <- DEVSECOPS_TODO #D
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # ------------------------------------------------------------------
+  # 5. Container image scanning (DEVSECOPS_TODO #8)
+  #    Builds both first-party images, then scans them before they'd
+  #    ever be pushed anywhere. Does NOT scan third-party base images
+  #    pulled straight from a registry (postgres, redis, nginx) — those
+  #    are out of this repo's control; scan the ones this repo builds.
+  # ------------------------------------------------------------------
+  container-scan:
+    name: trivy image scan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aegis-backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+          - name: aegis-sandbox
+            context: ./sandbox
+            dockerfile: ./sandbox/docker/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: ${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Trivy scan
+        # Pinned to v0.36.0 (current at time of writing). Note the
+        # required "v" prefix: after a 2025 supply-chain incident,
+        # aquasecurity/trivy-action re-issued all tags with a "v" prefix
+        # and the old un-prefixed tags (e.g. "0.24.0") no longer resolve
+        # at all -- that's what "repository or version not found" means
+        # here, not a typo in the repo name. Check
+        # https://github.com/aquasecurity/trivy-action/releases for the
+        # current latest tag before bumping this.
+        uses: aquasecurity/trivy-action@v0.36.0
+        # continue-on-error: true   # <- DEVSECOPS_TODO #D
+        with:
+          image-ref: ${{ matrix.name }}:ci
+          format: sarif
+          output: trivy-${{ matrix.name }}.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.name }}.sarif
+          category: trivy-${{ matrix.name }}
+
+  # ------------------------------------------------------------------
+  # 6. Summary gate — single required-status-check target for branch
+  #    protection, instead of listing all five jobs individually.
+  # ------------------------------------------------------------------
+  ci-summary:
+    name: CI summary
+    runs-on: ubuntu-latest
+    needs: [compose-validate, dependency-scan, sast, secret-scan, container-scan]
+    if: always()
+    steps:
+      - name: Check job results
+        run: |
+          echo "compose-validate: ${{ needs.compose-validate.result }}"
+          echo "dependency-scan:  ${{ needs.dependency-scan.result }}"
+          echo "sast:             ${{ needs.sast.result }}"
+          echo "secret-scan:      ${{ needs.secret-scan.result }}"
+          echo "container-scan:   ${{ needs.container-scan.result }}"
+          if [[ "${{ needs.compose-validate.result }}" != "success" || \
+                "${{ needs.dependency-scan.result }}" != "success" || \
+                "${{ needs.sast.result }}" != "success" || \
+                "${{ needs.secret-scan.result }}" != "success" || \
+                "${{ needs.container-scan.result }}" != "success" ]]; then
+            echo "One or more security jobs failed — see individual job logs and the Security tab."
+            exit 1
+          fi

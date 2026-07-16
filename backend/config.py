@@ -11,12 +11,30 @@ Key security notes:
   - REDIS_URL must include the password when Redis is password-protected
     (format: redis://:PASSWORD@host:port/db). The validator below injects
     REDIS_PASSWORD into the URL if it is not already present.
+  - DATABASE_URL's password is now derived from AEGIS_DB_PASSWORD the same
+    way (see "Database" section below) -- this fixes a real deployment
+    bug: AEGIS_DB_PASSWORD (root .env, used by postgres/init.sh to create
+    the aegis_user role) and DATABASE_URL's embedded password (backend/.env,
+    a separate file) had to be kept in sync BY HAND with no passthrough
+    connecting them, and no validation catching drift. A backend/.env
+    written before -- or independently of -- the root .env silently
+    authenticates with the wrong password: Postgres itself starts fine,
+    the backend/Celery containers just can't log in, surfacing as
+    `password authentication failed for user "aegis_user"` in a loop,
+    forever, with the container marked unhealthy and every dependent
+    service refusing to start. docker-compose.yml now passes
+    AEGIS_DB_PASSWORD through to backend/celery_worker/celery_beat as a
+    real environment variable (not just env_file), and the validator
+    below makes it authoritative over whatever backend/.env's DATABASE_URL
+    happens to contain -- there is now exactly one place this password is
+    actually set (root .env), not two.
   - CORS_ALLOWED_ORIGINS should list Chrome extension origins and any
     dashboard domains — never use the wildcard "*" in production.
   - ARTIFACT_RETENTION_DAYS controls how long scan artifacts are kept on
     disk before the hourly file_cleanup task purges them (finding #8).
 """
 
+import logging
 from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
@@ -28,6 +46,8 @@ try:
     from pydantic import ValidationInfo
 except ImportError:
     ValidationInfo = object  # type: ignore[misc,assignment]
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -53,11 +73,68 @@ class Settings(BaseSettings):
 
     # -------------------------
     # Database
+    # AEGIS_DB_PASSWORD is the SAME credential postgres/init.sh uses to
+    # create the aegis_user role (sourced from the root .env, and now
+    # passed through to this container by docker-compose.yml's
+    # x-backend-common environment block -- see docker-compose.yml).
+    # DATABASE_URL is declared AFTER it so the validator below can read
+    # the already-resolved value via info.data (pydantic v2 validators
+    # only see previously-declared fields — same ordering constraint
+    # noted below for REDIS_PASSWORD/REDIS_URL).
     # -------------------------
+    AEGIS_DB_PASSWORD: str = ""
     DATABASE_URL: str = "postgresql+psycopg2://aegis_user:aegis_pass@postgres:5432/aegis_db"
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
     DB_ECHO: bool = False
+
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def _inject_db_password(cls, v: str, info) -> str:
+        """
+        Make AEGIS_DB_PASSWORD authoritative over whatever password (if
+        any) is already embedded in DATABASE_URL.
+
+        This is deliberately the OPPOSITE precedence of the Redis
+        validator below (which leaves an existing embedded password
+        alone). Here, the whole point is to eliminate a second place
+        this credential can drift: AEGIS_DB_PASSWORD is what Postgres
+        actually used to create the role (postgres/init.sh), so it's
+        the one source of truth. If DATABASE_URL's embedded password
+        differs from it, DATABASE_URL was wrong, not AEGIS_DB_PASSWORD --
+        overriding it here is the fix, not a trade-off.
+
+        If AEGIS_DB_PASSWORD isn't set at all (e.g. a non-Docker local
+        run that just wants to point DATABASE_URL at some other
+        Postgres directly), this is a no-op and DATABASE_URL is used
+        exactly as given.
+        """
+        password = (info.data or {}).get("AEGIS_DB_PASSWORD", "")
+        if not password:
+            return v
+
+        parsed = urlparse(v)
+        if parsed.password and parsed.password != password:
+            logger.warning(
+                "DATABASE_URL's embedded password does not match "
+                "AEGIS_DB_PASSWORD -- using AEGIS_DB_PASSWORD (the value "
+                "postgres/init.sh actually created the aegis_user role "
+                "with). If you intended to point at a different "
+                "database entirely, leave AEGIS_DB_PASSWORD unset."
+            )
+
+        username = parsed.username or "aegis_user"
+        host = parsed.hostname or "postgres"
+        port = parsed.port or 5432
+        new_netloc = f"{username}:{password}@{host}:{port}"
+        return urlunparse((
+            parsed.scheme,
+            new_netloc,
+            parsed.path,       # preserves /aegis_db
+            parsed.params,
+            parsed.query,
+            parsed.fragment,
+        ))
 
     # -------------------------
     # Redis / Celery

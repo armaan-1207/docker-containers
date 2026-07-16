@@ -130,6 +130,8 @@ docker containers/
 ├── docker-compose.yml      ← Master orchestration (start here)
 ├── aegis.ps1               ← PowerShell management helper
 ├── .gitignore
+├── .gitleaks.toml          ← Secret-scan allowlist (see CI section)
+├── .github/workflows/      ← CI: compose-validate, dep-scan, SAST, secrets, container-scan
 ├── README.md               ← This file
 │
 ├── backend/                ← FastAPI app + all Python source
@@ -188,8 +190,71 @@ docker containers/
 
 - Backend and Celery run as non-root `aegis` user (uid 1001)
 - Sandbox: `cap_drop: ALL`, `no-new-privileges`, `pids_limit: 512`
-- Celery worker mounts Docker socket **read-only** (spawns sandbox per job)
+- Celery worker talks to Docker only through a scoped `docker-socket-proxy`
+  (pinned by digest — see Known Trade-offs), not a raw socket mount
 - API keys stored in `backend/.env` only — never committed
 
 > **Before going live:** Change `SECRET_KEY` in `.env` to a 32+ char random string  
 > and add your threat intel API keys (VirusTotal, Google Safe Browsing, etc.)
+
+---
+
+## CI/CD
+
+`.github/workflows/security-ci.yml` runs on every push/PR to `main`:
+
+| Job | Tool | What it catches |
+|---|---|---|
+| `compose-validate` | `docker compose config` | Syntax errors, missing required env vars, invalid image refs |
+| `dependency-scan` | `pip-audit` | Known CVEs in `backend/requirements.txt` and `sandbox/docker/requirements.txt` |
+| `sast` | `bandit` + `semgrep` | Python-specific and general security anti-patterns in source |
+| `secret-scan` | `gitleaks` | Committed credentials, keys, tokens (full history on push, diff on PR) |
+| `container-scan` | `trivy` | CVEs in the built `aegis-backend` and `aegis-sandbox` images |
+
+Findings from `bandit`, `semgrep`, and `trivy` are uploaded as SARIF to the
+repo's **Security** tab. Severity gates currently **fail the build** on
+CRITICAL/HIGH — see the workflow file's own comments for how to soft-launch
+these as non-blocking for an initial triage period.
+
+`.gitleaks.toml` holds the allowlist for confirmed false positives only
+(placeholder `.env.example` values, the pHash reference set, documented
+fake honeytoken credentials in the sandbox's opt-in probe). Never add an
+entry here to silence a real finding.
+
+---
+
+## Known Trade-offs
+
+Deliberate design decisions worth knowing about before an incident, not
+after one.
+
+**Redis has no persistence.** `--save "" --appendonly no` is intentional —
+Redis here is a cache/broker, not a system of record. The trade-off: a
+Redis restart mid-pipeline silently drops any in-flight Celery task
+messages that hadn't yet been acked, **regardless of `task_acks_late`**
+(that setting protects against a *worker* crash re-delivering a task, not
+against the *broker* losing the message entirely). If Redis restarts while
+scans are in flight, those specific scans simply stop progressing through
+the pipeline — nothing raises an error, nothing retries, they just don't
+finish. Recovery today is manual: check `scans.status` in Postgres for
+anything stuck in a `*_running` state older than a few minutes and
+re-trigger it. If this becomes a real operational problem, the fix is
+Redis persistence (AOF) or a durable broker, not a Celery-side setting.
+
+**JWT has no revocation path.** Access tokens are signed, stateless, and
+valid for `ACCESS_TOKEN_EXPIRE_MINUTES` (60 min default) no matter what
+happens after they're issued — there's no server-side "log out everywhere"
+or blocklist. A stolen token stays valid until it naturally expires. The
+60-minute TTL bounds the blast radius, which is an acceptable trade-off for
+now, but if session invalidation becomes a real requirement, the two real
+options are a Redis-backed revocation blocklist (checked on every request —
+adds a Redis round-trip per auth) or short-lived access tokens + rotating
+refresh tokens (more moving parts, no per-request Redis cost). Neither is
+implemented yet; this is backlogged, not silently missing.
+
+**`docker_socket_proxy` is pinned by tag+digest, not a floating tag.**
+This container has real privilege (it's the only path `celery_worker` has
+to spawn sandbox containers) — see `.github/workflows/security-ci.yml` and
+the pin in `docker-compose.yml` for how that's kept from drifting silently
+on a rebuild. Bumping it later means deliberately updating the digest, not
+just re-pulling `:latest`.

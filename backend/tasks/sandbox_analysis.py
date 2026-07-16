@@ -40,8 +40,38 @@ logger = logging.getLogger(__name__)
 SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", settings.SANDBOX_IMAGE)
 SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", settings.SHARED_SCANS_VOLUME)
 
-# Network to attach the sandbox container to (must be isolated from aegis_net)
-SANDBOX_NETWORK = os.environ.get("SANDBOX_NETWORK", "project-docker-containers_sandbox_net")
+# Network to attach the sandbox container to (must be isolated from aegis_net).
+#
+# DEVSECOPS_TODO #3: the fallback below is a GUESS at Docker Compose's
+# auto-generated network name (<project_name>_sandbox_net), which only
+# matches if this repo's checkout directory is literally named
+# "docker-containers" (Compose derives the project name from the
+# directory unless COMPOSE_PROJECT_NAME is set). Any other checkout
+# path/name means this guess is simply wrong, and `docker run --network
+# <wrong-name>` fails at spawn time for every single scan.
+#
+# This can't be fixed with a better hardcoded guess — the real fix is
+# setting SANDBOX_NETWORK explicitly in backend/.env for your actual
+# deployment. What CAN be fixed here is not failing silently: log a
+# clear warning on import so this shows up in the worker's own startup
+# logs instead of only surfacing as a confusing per-scan Docker error
+# with no obvious cause.
+_SANDBOX_NETWORK_ENV = os.environ.get("SANDBOX_NETWORK")
+if _SANDBOX_NETWORK_ENV:
+    SANDBOX_NETWORK = _SANDBOX_NETWORK_ENV
+else:
+    SANDBOX_NETWORK = "project-docker-containers_sandbox_net"
+    logger.warning(
+        "SANDBOX_NETWORK not set in backend/.env -- falling back to a "
+        "guessed network name (%s) that only matches if this repo's "
+        "checkout directory is literally named 'docker-containers'. "
+        "Run `docker network ls` to find the real name Compose generated "
+        "for this deployment (or set COMPOSE_PROJECT_NAME), then set "
+        "SANDBOX_NETWORK explicitly -- otherwise every sandbox_analysis "
+        "task will fail at container-spawn time with a confusing Docker "
+        "error instead of this clear one.",
+        SANDBOX_NETWORK,
+    )
 
 
 def _scan_dir(scan_id: str) -> str:

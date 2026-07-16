@@ -1,0 +1,45 @@
+title = "AEGIS gitleaks config"
+
+# Use gitleaks' default detection rules; only extend the allowlist below.
+# Do NOT add broad path-based ignores here for anything under backend/ or
+# sandbox/ source — only specific, verified false positives go in this
+# file, per DEVSECOPS_TODO's verification checklist ("add allowlist entries
+# for confirmed false positives only, never to silence a real finding").
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives — placeholders, examples, and non-secret reference data"
+
+paths = [
+  # Templates by design: every value in these is a placeholder the user
+  # must replace before deploying, never a real credential.
+  '''\.env\.example$''',
+  '''backend/\.env\.example$''',
+
+  # Perceptual-hash reference set for brand-impersonation matching —
+  # these are 16-char hex pHash strings (image fingerprints), not secrets.
+  # High entropy hex triggers generic "possible secret" detectors.
+  '''sandbox/backend/reference_hashes\.json$''',
+]
+
+regexes = [
+  # Example JWTs / bearer tokens used purely as documentation in
+  # docstrings and Pydantic schema_extra examples (schemas/auth.py,
+  # schemas/responses.py) — truncated with "..." and not decodable to a
+  # real signed token.
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.\.\.''',
+
+  # Deliberately fake, documented-as-fake honeytoken values used by the
+  # sandbox's opt-in credential-redirect probe (phishing_sandbox_scan.py:
+  # DECOY_EMAIL / DECOY_PASSWORD). Never real credentials — the strings
+  # themselves say "NOT-A-REAL-Credential".
+  '''Sandbox-Probe-NOT-A-REAL-Credential-1!''',
+  '''sandbox-probe@example-research\.invalid''',
+]
+
+# Explicitly-named placeholder secrets from committed example/template
+# files — listed individually (not wildcarded) so a real secret that
+# happens to live in the same file still gets caught.
+commits = []
