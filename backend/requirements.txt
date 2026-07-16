@@ -1,0 +1,53 @@
+# ===================================================
+# AEGIS Backend - Python Dependencies
+# FastAPI + Uvicorn + Celery + PostgreSQL + Redis
+# ===================================================
+
+# --- Web Framework ---
+fastapi==0.111.1
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+
+# --- Auth / Security ---
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.3
+
+# --- Database ---
+sqlalchemy==2.0.31
+psycopg2-binary==2.9.9
+alembic==1.13.2
+
+# --- Redis / Celery ---
+redis==5.0.8
+celery==5.4.0
+kombu==5.3.4
+
+# --- HTTP Client ---
+httpx==0.27.0
+aiohttp==3.9.5
+
+# --- Pydantic / Settings ---
+pydantic==2.8.2
+pydantic-settings==2.3.4
+
+# --- AI / ML ---
+lightgbm==4.4.0
+numpy==1.26.4
+scikit-learn==1.5.1
+joblib==1.4.2
+
+# --- Image / Vision ---
+Pillow==10.4.0
+pytesseract==0.3.13
+opencv-python-headless==4.10.0.84
+
+# --- Threat Intelligence ---
+requests==2.32.3
+dnspython==2.6.1
+tldextract==5.1.2
+
+# --- Utilities ---
+python-dotenv==1.0.1
+structlog==24.4.0
+watchdog==4.0.1

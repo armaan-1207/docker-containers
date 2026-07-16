@@ -1,0 +1,191 @@
+"""
+consistency_engine/consistency_engine.py
+==========================================
+"""
+
+import difflib
+import logging
+from typing import Optional
+
+from PIL import Image
+
+try:
+    import imagehash
+    _HAS_IMAGEHASH = True
+except ImportError:
+    _HAS_IMAGEHASH = False
+
+import numpy as np
+
+from ai_engine.ocr import extract_text
+from ai_engine.vision import analyze_screenshot
+from ai_engine.dom_extractor import extract_features
+
+logger = logging.getLogger(__name__)
+
+MISMATCH_THRESHOLD = 0.6
+
+WEIGHTS = {
+    "screenshot": 0.25,
+    "ocr": 0.20,
+    "dom": 0.20,
+    "metadata": 0.15,
+    "logo": 0.20,
+}
+
+
+class ConsistencyEngine:
+    
+
+    def compare_screenshots(self, browser_png_path: str, sandbox_png_path: str) -> dict:
+        try:
+            similarity = self._compare_images(browser_png_path, sandbox_png_path)
+        except Exception:
+            logger.exception("Screenshot comparison failed")
+            similarity = 0.0
+
+        return {"similarity": similarity, "method": "phash" if _HAS_IMAGEHASH else "pixel_diff"}
+
+    def _compare_images(self, path_a: str, path_b: str) -> float:
+        if _HAS_IMAGEHASH:
+            hash_a = imagehash.average_hash(Image.open(path_a))
+            hash_b = imagehash.average_hash(Image.open(path_b))
+            max_distance = len(hash_a.hash) ** 2
+            distance = hash_a - hash_b
+            return max(0.0, 1.0 - (distance / max_distance))
+
+        img_a = np.asarray(Image.open(path_a).convert("L").resize((64, 64)), dtype=float)
+        img_b = np.asarray(Image.open(path_b).convert("L").resize((64, 64)), dtype=float)
+        mean_abs_diff = np.mean(np.abs(img_a - img_b)) / 255.0
+        return max(0.0, 1.0 - mean_abs_diff)
+
+    def compare_ocr(self, browser_ocr_text: str, sandbox_png_path: str) -> dict:
+        try:
+            sandbox_ocr_text = extract_text(sandbox_png_path)
+        except Exception:
+            logger.exception("Sandbox OCR extraction failed")
+            sandbox_ocr_text = ""
+
+        similarity = difflib.SequenceMatcher(
+            None, (browser_ocr_text or "").strip(), (sandbox_ocr_text or "").strip()
+        ).ratio()
+
+        return {"similarity": similarity, "sandbox_ocr_text": sandbox_ocr_text}
+
+    def compare_dom(self, browser_dom: dict, sandbox_html_path: str) -> dict:
+        try:
+            sandbox_dom = extract_features(sandbox_html_path)
+        except Exception:
+            logger.exception("Sandbox DOM extraction failed")
+            sandbox_dom = {}
+
+        similarity = self._compare_dicts(browser_dom or {}, sandbox_dom)
+        return {"similarity": similarity, "sandbox_dom": sandbox_dom}
+
+    def _compare_dicts(self, dict_a: dict, dict_b: dict) -> float:
+        keys = set(dict_a.keys()) | set(dict_b.keys())
+        if not keys:
+            return 1.0
+
+        matches = 0
+        for key in keys:
+            val_a, val_b = dict_a.get(key), dict_b.get(key)
+            if isinstance(val_a, list) or isinstance(val_b, list):
+                set_a, set_b = set(val_a or []), set(val_b or [])
+                union = set_a | set_b
+                matches += (len(set_a & set_b) / len(union)) if union else 1.0
+            else:
+                matches += 1.0 if val_a == val_b else 0.0
+
+        return matches / len(keys)
+
+    def compare_metadata(self, browser_dom: dict, sandbox_metadata: dict) -> dict:
+        browser_title = (browser_dom or {}).get("title", "")
+        sandbox_title = (sandbox_metadata or {}).get("title", "")
+        title_similarity = difflib.SequenceMatcher(
+            None, browser_title.strip(), sandbox_title.strip()
+        ).ratio()
+
+        browser_url = (browser_dom or {}).get("final_url", "")
+        sandbox_url = (sandbox_metadata or {}).get("final_url", "")
+        if not browser_url and not sandbox_url:
+            url_match = 1.0
+        else:
+            url_match = 1.0 if browser_url and browser_url == sandbox_url else 0.0
+
+        similarity = (title_similarity + url_match) / 2
+        return {
+            "similarity": similarity,
+            "title_similarity": title_similarity,
+            "final_url_match": bool(url_match),
+        }
+
+    def compare_logo(self, browser_vision: dict, sandbox_png_path: str) -> dict:
+        try:
+            sandbox_vision = analyze_screenshot(sandbox_png_path)
+        except Exception:
+            logger.exception("Sandbox vision analysis failed")
+            sandbox_vision = {}
+
+        browser_brand = self._logo_signature(browser_vision)
+        sandbox_brand = self._logo_signature(sandbox_vision)
+
+        if browser_brand is None and sandbox_brand is None:
+            similarity = 1.0
+        elif browser_brand == sandbox_brand:
+            similarity = 1.0
+        else:
+            similarity = 0.0
+
+        return {
+            "similarity": similarity,
+            "browser_brand": browser_brand,
+            "sandbox_brand": sandbox_brand,
+        }
+
+    def _logo_signature(self, vision_result: dict) -> Optional[str]:
+        logo = (vision_result or {}).get("logo") or {}
+        return logo.get("brand")
+
+    def generate_consistency_report(self, comparisons: dict) -> dict:
+        overall_score = sum(
+            comparisons[name]["similarity"] * weight for name, weight in WEIGHTS.items()
+        )
+
+        mismatches = [
+            name for name, weight in WEIGHTS.items()
+            if comparisons[name]["similarity"] < MISMATCH_THRESHOLD
+        ]
+
+        cloaking_suspected = (
+            overall_score < MISMATCH_THRESHOLD or "logo" in mismatches
+        )
+
+        return {
+            "consistency_score": round(overall_score, 4),
+            "comparisons": comparisons,
+            "mismatches": mismatches,
+            "cloaking_suspected": cloaking_suspected,
+        }
+
+    def analyze(self, browser_artifacts: dict, sandbox_artifacts: dict) -> dict:
+        browser_features = browser_artifacts.get("features", {})
+        browser_dom = browser_features.get("dom", {})
+        browser_ocr_text = browser_features.get("ocr_text", "")
+        browser_vision = browser_features.get("vision", {})
+
+        sandbox_png_path = sandbox_artifacts["png_path"]
+        sandbox_html_path = sandbox_artifacts["html_path"]
+        sandbox_metadata = sandbox_artifacts.get("metadata", {})
+
+        comparisons = {
+            "screenshot": self.compare_screenshots(
+                browser_artifacts["png_path"], sandbox_png_path
+            ),
+            "ocr": self.compare_ocr(browser_ocr_text, sandbox_png_path),
+            "dom": self.compare_dom(browser_dom, sandbox_html_path),
+            "metadata": self.compare_metadata(browser_dom, sandbox_metadata),
+            "logo": self.compare_logo(browser_vision, sandbox_png_path),
+        }
+
+        return self.generate_consistency_report(comparisons)

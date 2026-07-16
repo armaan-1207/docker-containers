@@ -1,0 +1,279 @@
+# =======================================================
+# AEGIS — Master Docker Compose
+# 7 containers + 1 shared volume
+#
+# Containers:
+#   nginx          — Receptionist (port 80 → backend:8000)
+#   backend        — FastAPI / Uvicorn (Unicorn receiver → FastAPI router)
+#   redis          — Broker + result backend for Celery
+#   postgres       — Primary datastore (users, scans, incidents, IOCs)
+#   celery_worker  — Task runner (OCR, vision, sandbox, risk_fusion, alerts)
+#   celery_beat    — Periodic scheduler (consistency, risk, alerts)
+#   sandbox        — Playwright detonation container (run-per-job)
+#
+# Shared Volume:
+#   shared_scans   — Backend writes screenshots, Sandbox reads/writes results
+#
+# Usage:
+#   docker compose up -d          # start all persistent services
+#   docker compose logs -f        # follow all logs
+#   docker compose down           # stop and remove containers
+#   docker compose down -v        # also wipe volumes (DESTRUCTIVE)
+#
+# Resource-saver mode (Docker Desktop):
+#   All non-critical containers have mem_limit set conservatively.
+#   Set COMPOSE_PROFILES=full to remove limits.
+# =======================================================
+
+
+# -------------------------------------------------------
+# SHARED CONFIGURATION ANCHORS
+# -------------------------------------------------------
+x-backend-common: &backend-common
+  build:
+    context: ./Backend
+    dockerfile: Dockerfile
+  env_file:
+    - ./Backend/.env
+  volumes:
+    - shared_scans:/shared/scans
+  networks:
+    - aegis_net
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+# -------------------------------------------------------
+# SERVICES
+# -------------------------------------------------------
+services:
+
+  # ---------------------------------------------------
+  # 1. NGINX — Receptionist
+  #    Listens on host port 80 → proxies to backend:8000
+  #    Handles REST (/api/) and WebSocket (/ws) upgrades
+  # ---------------------------------------------------
+  nginx:
+    container_name: aegis_nginx
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    networks:
+      - aegis_net
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: "128m"
+    cpus: "0.5"
+
+  # ---------------------------------------------------
+  # 2. BACKEND — FastAPI / Uvicorn
+  #    Unicorn receives from Nginx → FastAPI routes
+  #    auth.py decodes JWT → finds user in Postgres
+  #    calls Pydantic schemas → queues Celery tasks
+  # ---------------------------------------------------
+  backend:
+    <<: *backend-common
+    container_name: aegis_backend
+    command: >
+      uvicorn main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 2
+      --log-level info
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    mem_limit: "512m"
+    cpus: "1.0"
+
+  # ---------------------------------------------------
+  # 3. REDIS — Broker + Cache
+  #    Celery broker/result-backend
+  #    Also used for URL scan result caching (1h TTL)
+  # ---------------------------------------------------
+  redis:
+    container_name: aegis_redis
+    image: redis:7.2-alpine
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    networks:
+      - aegis_net
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: "300m"
+    cpus: "0.5"
+
+  # ---------------------------------------------------
+  # 4. POSTGRES — Primary Datastore
+  #    Tables: users, scans, incidents, iocs, statistics
+  #    Init script creates aegis_db + extensions
+  # ---------------------------------------------------
+  postgres:
+    container_name: aegis_postgres
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_root_pass
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./Postrgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    networks:
+      - aegis_net
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: "512m"
+    cpus: "1.0"
+
+  # ---------------------------------------------------
+  # 5. CELERY WORKER — Task Runner
+  #    Executes pipeline tasks in order:
+  #      browser_features → sandbox_analysis →
+  #      consistency → risk_fusion → alert_pipeline
+  #    Has Docker socket access to spawn sandbox containers
+  # ---------------------------------------------------
+  celery_worker:
+    <<: *backend-common
+    container_name: aegis_celery_worker
+    entrypoint: ["/app/celery_entrypoint.sh"]
+    command: >
+      celery -A celery_worker worker
+      --loglevel=info
+      --concurrency=2
+      --queues=default,sandbox,alerts
+      --hostname=worker@%h
+    volumes:
+      - shared_scans:/shared/scans
+      # Docker socket — worker spawns sandbox containers (Option A)
+      # SECURITY NOTE: use a scoped Docker API proxy in production
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A celery_worker inspect ping --timeout 5 2>&1 | grep -c pong || exit 1"]
+      interval: 45s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    mem_limit: "768m"
+    cpus: "1.5"
+
+  # ---------------------------------------------------
+  # 6. CELERY BEAT — Periodic Scheduler
+  #    Fires scheduled tasks:
+  #      consistency check  → every 15 min
+  #      risk fusion        → every hour
+  #      alert pipeline     → every 5 min
+  # ---------------------------------------------------
+  celery_beat:
+    <<: *backend-common
+    container_name: aegis_celery_beat
+    entrypoint: ["/app/celery_entrypoint.sh"]
+    command: >
+      celery -A celery_beat beat
+      --loglevel=info
+      --scheduler celery.beat:PersistentScheduler
+      --schedule /app/celerybeat-schedule/celerybeat-schedule
+    volumes:
+      - shared_scans:/shared/scans
+      - celery_beat_data:/app/celerybeat-schedule
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/celerybeat-schedule/celerybeat-schedule || test -f /tmp/.celery-beat-alive"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: "256m"
+    cpus: "0.5"
+
+  # ---------------------------------------------------
+  # 7. SANDBOX — Playwright Detonation Container
+  #    Stage 5: Full phishing sandbox detonation
+  #    Run-per-job (not persistent) — invoked by celery_worker
+  #    via `docker run` or `docker compose run sandbox <URL>`
+  #    Writes results atomically to shared_scans volume
+  #
+  #    Build context points to the sandboxV3 repo in Downloads.
+  #    If you move the repo, update the context path below.
+  # ---------------------------------------------------
+  sandbox:
+    container_name: aegis_sandbox
+    build:
+      context: C:/Users/armaa/Downloads/phishing-sandboxV3
+      dockerfile: docker/Dockerfile
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - shared_scans:/app/output
+    networks:
+      - aegis_net
+    # Security hardening (per sandbox's own docker-compose.yml)
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: "2g"
+    cpus: "1.5"
+    pids_limit: 512
+    shm_size: "1gb"
+    # Sandbox is run-per-job; it exits after each scan.
+    # Use: docker compose run --rm sandbox <URL> --output-dir /app/output
+    profiles:
+      - sandbox
+
+# -------------------------------------------------------
+# VOLUMES
+# -------------------------------------------------------
+volumes:
+
+  # Shared scan artefacts volume — the central shared bus:
+  #   backend      → writes screenshots (Stage 2)
+  #   celery_worker→ queues and monitors jobs
+  #   sandbox      → writes scan_<id>.json + .png results (Stage 5)
+  shared_scans:
+    driver: local
+
+  # PostgreSQL persistent data
+  postgres_data:
+    driver: local
+
+  # Celery Beat schedule persistence (survives container restart)
+  celery_beat_data:
+    driver: local
+
+# -------------------------------------------------------
+# NETWORKS
+# -------------------------------------------------------
+networks:
+  aegis_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

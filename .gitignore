@@ -1,0 +1,15 @@
+.env
+*.env.local
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+models/*.pkl
+models/*.joblib
+celerybeat-schedule
+celerybeat.pid
+*.log
+logs/
