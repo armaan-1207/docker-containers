@@ -1,5 +1,5 @@
 # =======================================================
-# AEGIS — Master Docker Compose  (v2 — Security Hardened)
+# AEGIS — Master Docker Compose  (v3 — DevSecOps follow-up hardening)
 # 8 containers + 1 socket proxy + shared volumes
 #
 # Containers:
@@ -13,8 +13,10 @@
 #   sandbox            — Playwright detonation container (isolated network)
 #
 # Networks:
-#   aegis_net     — Internal bridge for all core services
-#   sandbox_net   — Isolated bridge for sandbox only (no route to aegis_net)
+#   aegis_net        — Internal bridge for core services (nginx/backend/db/redis/beat)
+#   docker_proxy_net — NEW: isolated bridge, ONLY celery_worker + docker_socket_proxy.
+#                      See "DevSecOps follow-up" note below.
+#   sandbox_net      — Isolated bridge for sandbox only (no route to aegis_net)
 #
 # Shared Volumes:
 #   shared_scans  — Backend writes screenshots; Sandbox writes results
@@ -93,6 +95,9 @@ services:
   #    Unicorn receives from Nginx → FastAPI routes
   #    auth.py decodes JWT → finds user in Postgres
   #    calls Pydantic schemas → queues Celery tasks
+  #
+  #    NOTE: backend is NOT on docker_proxy_net — it never talks to
+  #    Docker directly, only celery_worker does (via Celery task queue).
   # ---------------------------------------------------
   backend:
     <<: *backend-common
@@ -197,11 +202,9 @@ services:
   #    All other endpoints (exec, images, volumes, info,
   #    swarm, etc.) are blocked at the proxy level.
   #
-  #    Runs on its own internal network alongside aegis_net.
-  # ---------------------------------------------------
   docker_socket_proxy:
     container_name: aegis_socket_proxy
-    image: tecnativa/docker-socket-proxy:latest
+    image: tecnativa/docker-socket-proxy:@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
     environment:
       # Minimum permissions: create + start sandbox containers only
       CONTAINERS: 1
@@ -228,7 +231,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
-      - aegis_net
+      - docker_proxy_net   # CHANGED: was aegis_net
     restart: unless-stopped
     deploy:
       resources:
@@ -243,10 +246,21 @@ services:
   #      consistency → risk_fusion → alert_pipeline
   #    Uses Docker SOCKET PROXY (not raw socket) to
   #    spawn sandbox containers safely.
+  #
+  #    DevSecOps follow-up fix: now dual-homed on BOTH aegis_net
+  #    (Postgres, Redis) AND docker_proxy_net (the socket proxy).
+  #    It's the only service besides the proxy itself on
+  #    docker_proxy_net. The explicit `networks:` list below
+  #    overrides the single-network list inherited from
+  #    x-backend-common (YAML merge keys let explicit sibling keys
+  #    win over merged ones from the anchor).
   # ---------------------------------------------------
   celery_worker:
     <<: *backend-common
     container_name: aegis_celery_worker
+    networks:
+      - aegis_net          # Postgres, Redis
+      - docker_proxy_net   # NEW: docker_socket_proxy only reachable here
     entrypoint: ["/app/celery_entrypoint.sh"]
     command: >
       celery -A celery_worker worker
@@ -255,7 +269,8 @@ services:
       --queues=default,sandbox,alerts
       --hostname=worker@%h
     environment:
-      # Point Docker client at the socket proxy, not the raw socket
+      # Point Docker client at the socket proxy, not the raw socket.
+      # Resolves via docker_proxy_net now, not aegis_net.
       DOCKER_HOST: tcp://docker_socket_proxy:2375
     depends_on:
       postgres:
@@ -284,9 +299,13 @@ services:
   #    Fires scheduled maintenance tasks:
   #      file_cleanup: hourly purge of scan artifacts
   #      older than ARTIFACT_RETENTION_DAYS (default 14d)
+  #
+  #    NOTE: celery_beat only ever enqueues task *names* onto Redis —
+  #    it never talks to Docker directly, so it stays aegis_net-only
+  #    (inherited from x-backend-common) and does NOT get docker_proxy_net.
   # ---------------------------------------------------
   celery_beat:
-    <<: *backend-common
+    <<: [*backend-common,  *default-resources]
     container_name: aegis_celery_beat
     entrypoint: ["/app/celery_entrypoint.sh"]
     command: >
@@ -303,7 +322,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    <<: *default-resources
 
   # ---------------------------------------------------
   # 8. SANDBOX — Playwright Detonation Container
@@ -352,7 +370,7 @@ services:
 # -------------------------------------------------------
 volumes:
   # Shared scan artefacts — the central shared bus:
-  #   backend       → writes screenshots (Stage 2)
+  #   backend       → writes screenshots (Stage 1)
   #   celery_worker → queues and monitors jobs
   #   sandbox       → writes scan_<id>.json + .png results
   shared_scans:
@@ -376,6 +394,18 @@ networks:
     ipam:
       config:
         - subnet: 172.20.0.0/16
+
+  # NEW (DevSecOps follow-up): isolated network for the Docker socket
+  # proxy. Only celery_worker and docker_socket_proxy attach to this —
+  # nginx, backend, postgres, and redis have no route to the proxy's
+  # CONTAINERS+POST API at all. `internal: true` also means this
+  # network itself has no external gateway/internet egress.
+  docker_proxy_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24
 
   # Sandbox isolation — sandbox_net has internet egress
   # but ZERO routing path to aegis_net (no shared subnet,

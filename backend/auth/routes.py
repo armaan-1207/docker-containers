@@ -3,14 +3,7 @@ auth/routes.py
 ================
 Authentication endpoints: register and login.
 
-Security hardening applied (findings #5 & #6 from security review):
-  - Timing side-channel fix: verify_password() is ALWAYS called even
-    when the user is not found — a dummy hash absorbs the bcrypt CPU
-    cycles so both paths take identical time and enumeration via timing
-    differences becomes infeasible.
-  - Registration oracle fix: a duplicate-email registration now returns
-    202 Accepted with a generic message rather than 409 Conflict, so
-    unauthenticated callers cannot enumerate existing accounts.
+
 """
 
 import logging
@@ -57,20 +50,26 @@ def register(
     Always returns 202 Accepted with a generic message — never 409
     Conflict — so that unauthenticated callers cannot determine whether a
     given email address already exists in the system (security finding #6).
-
-    The confirmation-style message pattern also sets the stage for adding
-    an email verification flow without breaking the API contract.
+    
     """
     existing = db.query(User).filter(User.email == payload.email).first()
+
+    # Always pay the bcrypt cost -- whether or not this email is already
+    # registered -- so response timing cannot be used to distinguish the
+    # two outcomes. The computed hash is simply discarded on the
+    # duplicate-email path.
+    hashed_password = hash_password(payload.password)
+
     if existing is not None:
         # Do NOT reveal that this email is already registered.
-        # Return the same 202 shape so callers cannot tell the difference.
+        # Return the same 202 shape so callers cannot tell the difference,
+        # and (as of this fix) take the same amount of time to do it.
         logger.info("Registration attempted for existing email (returning 202 to caller)")
         return UserRegisterAcceptedResponse()
 
     user = User(
         email=payload.email,
-        hashed_password=hash_password(payload.password),
+        hashed_password=hashed_password,
     )
     db.add(user)
     db.commit()
