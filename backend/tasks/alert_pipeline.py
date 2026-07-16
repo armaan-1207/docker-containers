@@ -1,6 +1,16 @@
 """
 tasks/alert_pipeline.py
 =========================
+Stage 5 of the AEGIS Celery pipeline: creates Incident + IOC database rows
+and fires a Slack notification for HIGH and CRITICAL risk verdicts.
+
+Security hardening:
+  Defense-in-depth is_placeholder guard added at task entry point.
+  risk_fusion.py already suppresses dispatch when is_placeholder=True, but
+  this guard ensures correctness even if that gate is bypassed in future
+  code paths (e.g. direct task invocation in tests, Celery task retry edge
+  cases, or bulk replay scripts). No Incident row or Slack alert is ever
+  created from a random-number placeholder score.
 """
 
 import logging
@@ -114,6 +124,19 @@ def alert_pipeline_task(self, scan_id: str, risk_report: dict):
         scan_id,
         risk_report.get("severity"),
     )
+
+    # ── Defense-in-depth: is_placeholder guard ─────────────────────────────
+    # risk_fusion.py already blocks dispatch when is_placeholder=True, but
+    # guard here as well so direct invocations (tests, replays) cannot
+    # accidentally write Incident rows or fire Slack alerts from random scores.
+    if risk_report.get("is_placeholder", True):
+        logger.warning(
+            "[%s] alert_pipeline called with is_placeholder=True — aborting "
+            "(no Incident row, no Slack). This should not happen via normal "
+            "pipeline flow. Check risk_fusion.py dispatch gate.",
+            scan_id,
+        )
+        return {"scan_id": scan_id, "status": "alert_skipped", "reason": "is_placeholder"}
 
     try:
         with get_db_session() as db:

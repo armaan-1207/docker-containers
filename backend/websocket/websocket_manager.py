@@ -33,7 +33,9 @@ class WebSocketManager:
         self._listen_tasks: Dict[str, asyncio.Task] = {}
 
     async def connect_browser(self, scan_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
+        # NOTE: websocket.accept() is called by main.py BEFORE frame-based auth.
+        # Calling accept() here again would raise a Starlette RuntimeError
+        # ("WebSocket is already accepted"). Do NOT call accept() here.
         self.browser_connections[scan_id] = websocket
         logger.info("[%s] browser connected", scan_id)
         self._listen_tasks[f"browser:{scan_id}"] = asyncio.create_task(
@@ -48,7 +50,8 @@ class WebSocketManager:
         logger.info("[%s] browser disconnected", scan_id)
 
     async def connect_user(self, user_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
+        # NOTE: websocket.accept() is called by main.py BEFORE frame-based auth.
+        # Do NOT call accept() here again.
         self.user_connections.setdefault(user_id, set()).add(websocket)
         logger.info("[%s] dashboard user connected", user_id)
         key = f"user:{user_id}:{id(websocket)}"

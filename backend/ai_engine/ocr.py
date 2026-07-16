@@ -1,29 +1,53 @@
 """
 ai_engine/ocr.py
 =================
-STATUS: PLACEHOLDER. This whole ai_engine package was missing from the
-uploaded project despite being imported by tasks/browser_features.py and
-consistency_engine/consistency_engine.py:
+OCR text extraction from screenshot images using Tesseract / pytesseract.
 
-    from ai_engine.ocr import extract_text
+Previously a placeholder that returned an empty string for every image.
+Now implements real OCR via pytesseract so the consistency engine's
+compare_ocr() method has actual text to compare between browser and
+sandbox screenshots instead of two empty strings (which would always be
+indeterminate and always skipped from the consistency score).
 
-Both call sites already document the expected contract:
-    extract_text(image_path: str) -> str
-
-TODO (whoever owns the AI/vision layer): swap this for a real OCR engine,
-e.g. pytesseract:
-
-    import pytesseract
-    from PIL import Image
-    def extract_text(image_path: str) -> str:
-        return pytesseract.image_to_string(Image.open(image_path))
+Requirements: pytesseract>=0.3.13, tesseract-ocr installed in the container.
+The backend Dockerfile already installs tesseract-ocr via apt-get.
 """
 
 import logging
+
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 
 def extract_text(image_path: str) -> str:
-    logger.warning("ai_engine.ocr.extract_text is a placeholder - returning empty string for %s", image_path)
-    return ""
+    """
+    Extract text from an image using Tesseract OCR.
+
+    Returns the extracted text as a string. Returns an empty string on
+    error (e.g., file not found, corrupt image) rather than raising —
+    the consistency engine handles empty-string cases gracefully.
+    """
+    try:
+        import pytesseract  # type: ignore[import-untyped]
+    except ImportError:
+        logger.error(
+            "pytesseract is not installed — cannot extract text from %s. "
+            "Add pytesseract to requirements.txt and rebuild the container.",
+            image_path,
+        )
+        return ""
+
+    try:
+        img = Image.open(image_path)
+        text = pytesseract.image_to_string(img)
+        logger.debug(
+            "OCR extracted %d chars from %s", len(text), image_path
+        )
+        return text
+    except FileNotFoundError:
+        logger.warning("OCR: image file not found: %s", image_path)
+        return ""
+    except Exception:
+        logger.exception("OCR extraction failed for %s — returning empty string", image_path)
+        return ""

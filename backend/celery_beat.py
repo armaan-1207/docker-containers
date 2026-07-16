@@ -16,6 +16,17 @@ Registered task names (must match @celery.task(name=...) in tasks/):
     "tasks.consistency"
     "tasks.risk_fusion"
     "tasks.alert_pipeline"
+    "tasks.file_cleanup"   ← NEW (finding #8 fix)
+
+Security fix (finding #8):
+  The previous beat_schedule was empty ({}) which meant scan artifacts
+  (browser.png, browser.html, sandbox.png, *.json) would accumulate on
+  the shared_scans volume indefinitely. With enough scans this would hit
+  100% disk usage, corrupting databases and causing a platform-wide
+  outage. The hourly file_cleanup task purges per-scan subdirectories
+  older than ARTIFACT_RETENTION_DAYS (default: 14 days) and also removes
+  any orphaned root-level scan_*.json / scan_*.png files left behind by
+  crashed mid-scan jobs.
 """
 
 from celery import Celery
@@ -38,18 +49,29 @@ celery.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    broker_connection_retry_on_startup=True,
 )
 
 # -------------------------------------------------------
 # Periodic schedules
 # -------------------------------------------------------
-# NOTE: The pipeline tasks (browser_features, sandbox_analysis, etc.)
-# require a scan_id and are triggered by the API — not beat.
-# Beat fires periodic "sweep" tasks that maintain system health.
-# Add your sweep tasks here as you build them out.
-# -------------------------------------------------------
 celery.conf.beat_schedule = {
 
+    # ── Artifact cleanup (finding #8 fix) ──────────────────────────────────
+    # Runs every hour. Walks the shared_scans directory tree and removes:
+    #   • Per-scan subdirectories older than ARTIFACT_RETENTION_DAYS
+    #   • Orphan files (scan_*.json, scan_*.png) at the volume root that
+    #     were left behind by crashes or incomplete scans
+    # This prevents disk exhaustion (High severity, Service Availability)
+    # that would otherwise corrupt databases and cause a platform outage.
+    "hourly-file-cleanup": {
+        "task": "tasks.file_cleanup",
+        "schedule": crontab(minute=0),          # top of every hour
+        "kwargs": {
+            "retention_days": getattr(settings, "ARTIFACT_RETENTION_DAYS", 14),
+        },
+        "options": {"queue": "default"},
+    },
 }
 
 if __name__ == "__main__":

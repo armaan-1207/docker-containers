@@ -1,8 +1,16 @@
 """
 tasks/risk_fusion.py
 =========================
+Stage 4 of the AEGIS Celery pipeline: assembles all evidence into a
+final risk verdict, writes it to Redis, and pushes a WebSocket update.
 
-
+Security hardening:
+  - Redis cache TTL set to 3600s (1 hour) — was previously set() with no
+    TTL, causing risk verdicts to persist in Redis indefinitely (finding #13).
+  - is_placeholder gate already suppresses false HIGH/CRITICAL alerts when
+    the real ML model is not yet wired in.
+  - Only non-placeholder verdicts are written to the cache (consistent with
+    the quickscan service's caching policy).
 """
 
 import asyncio
@@ -24,6 +32,11 @@ from websocket.websocket_manager import websocket_manager
 logger = logging.getLogger(__name__)
 
 _redis_client = redis.from_url(settings.REDIS_URL)
+
+# Authoritative risk result cache TTL.  Must be ≤ Chrome extension's own
+# in-memory cache TTL (or there is no point in the Redis cache at all).
+# 3600 s (1 hour) per the absolute_implementation_guide spec.
+_RISK_CACHE_TTL_SECONDS = 3600
 
 ALERT_SEVERITIES = {"HIGH", "CRITICAL"}
 
@@ -158,7 +171,20 @@ def risk_fusion_task(self, scan_id: str):
     with open(report_path, "w") as f:
         json.dump(risk_report, f, indent=2, default=str)
 
-    _redis_client.set(f"risk:{scan_id}", json.dumps(risk_report, default=str))
+    # Security finding #13 fix: was set() with no TTL (infinite persistence).
+    # Use setex(3600) so Redis automatically evicts the entry after 1 hour.
+    # Only cache non-placeholder verdicts (random scores must not be trusted).
+    if not risk_report.get("is_placeholder", True):
+        _redis_client.setex(
+            f"risk:{scan_id}",
+            _RISK_CACHE_TTL_SECONDS,
+            json.dumps(risk_report, default=str),
+        )
+    else:
+        logger.debug(
+            "[%s] Skipping Redis cache write — is_placeholder=True (random score)",
+            scan_id,
+        )
 
     _push_websocket_update(scan_id, risk_report)
 
