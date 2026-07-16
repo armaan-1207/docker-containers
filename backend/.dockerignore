@@ -45,3 +45,4 @@ models/*.joblib
 # Celery beat schedule
 celerybeat-schedule
 celerybeat.pid
+.env
