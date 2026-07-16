@@ -16,7 +16,7 @@ Complete, self-contained Docker infrastructure for the **AEGIS Phishing Intellig
 | `aegis_celery_beat` | desktop-celery_beat | Periodic scheduler | internal |
 | `aegis_sandbox` | desktop-sandbox | Playwright detonation (per-job) | internal |
 
-## Architecture Flow (matches your handwritten diagram)
+## Architecture Flow 
 
 ```
 Browser Extension
@@ -123,7 +123,6 @@ docker compose logs -f
 ```
 
 ---
-
 ## Folder Structure
 
 ```
@@ -145,16 +144,16 @@ docker containers/
 │   ├── celery_worker.py    ← Celery app (include= task discovery)
 │   ├── celery_beat.py      ← Beat scheduler + periodic tasks
 │   ├── api/                ← Route handlers
-│   ├── auth/               ← JWT auth
-│   ├── tasks/              ← Celery task modules (pipeline stages)
-│   ├── ai_engine/          ← OCR, Vision, DOM extractor
-│   ├── cyberintel/         ← Threat intel runners
-│   ├── consistency_engine/ ← Browser vs Sandbox diff engine
-│   ├── database/           ← SQLAlchemy models + session
-│   ├── schemas/            ← Pydantic request/response schemas
-│   ├── services/           ← Business logic services
-│   ├── websocket/          ← WebSocket manager
-│   └── models/             ← ML model files (.pkl)
+│   ├── auth/                ← JWT auth
+│   ├── tasks/               ← Celery task modules (pipeline stages)
+│   ├── ai_engine/            ← OCR, Vision, DOM extractor
+│   ├── cyberintel/           ← Threat intel runners
+│   ├── consistency_engine/  ← Browser vs Sandbox diff engine
+│   ├── database/             ← SQLAlchemy models + session
+│   ├── schemas/               ← Pydantic request/response schemas
+│   ├── services/               ← Business logic services
+│   ├── websocket/               ← WebSocket manager
+│   └── models/                   ← ML model files (.pkl)
 │
 ├── nginx/                  ← Nginx Receptionist
 │   ├── Dockerfile
@@ -166,17 +165,9 @@ docker containers/
 ├── redis/                  ← Redis broker + cache
 │   └── README.md
 │
-├── celery_worker/          ← Celery worker docs
-│   └── celery_worker.py    ← App entry point (reference copy)
-│
-├── celery_beat/            ← Celery beat docs
-│   └── celery_beat.py      ← Beat entry point (reference copy)
-│
-└── sandbox/                ← Playwright sandbox docs
+└── sandbox/                ← Playwright sandbox (Stage 5 detonation)
     └── README.md           ← Build instructions
 ```
-
----
 
 ## Resource Usage (Docker Desktop Resource-Saver Mode)
 

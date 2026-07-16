@@ -1,6 +1,20 @@
 """
 tasks/risk_fusion.py
 =========================
+
+PATCH NOTES (asyncio.run safety fix):
+  _push_websocket_update previously called asyncio.run(...) directly
+  from inside a synchronous Celery task body. This works today because
+  Celery's default prefork worker pool runs each task in a plain OS
+  process/thread with no event loop already running, so asyncio.run()
+  finds nothing to conflict with -- but it's a latent landmine: switch
+  this worker to --pool=gevent/eventlet, or ever call this function
+  from inside another async context (e.g. a future async task runner),
+  and asyncio.run() raises "RuntimeError: asyncio.run() cannot be
+  called from a running event loop" immediately. Replaced with a
+  small helper that reuses a loop if one is already running in this
+  thread and only creates a fresh one if not -- safe under both the
+  current prefork setup and a future async-aware one.
 """
 
 import asyncio
@@ -57,7 +71,7 @@ def _get_scan_fields(scan_id: str) -> dict:
 
 
 def _get_cyberintel(scan_id: str, browser_features: dict) -> dict:
-    
+
     cache_path = os.path.join(_scan_dir(scan_id), "cyberintel.json")
     if os.path.exists(cache_path):
         return _load_json(cache_path)
@@ -77,8 +91,39 @@ def _get_cyberintel(scan_id: str, browser_features: dict) -> dict:
     return cyberintel
 
 
+def _run_coroutine_sync(coro):
+    """
+    Runs `coro` to completion from synchronous code, whether or not an
+    event loop is already running in this thread. Prefer this over a
+    bare asyncio.run() call anywhere a function might end up invoked
+    from more than one execution context (sync Celery task today,
+    potentially an async caller later).
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No loop running in this thread -- the common case for a
+        # prefork Celery worker. Safe to just asyncio.run().
+        return asyncio.run(coro)
+
+    # A loop IS already running in this thread (e.g. gevent/eventlet
+    # pool, or called from async code) -- asyncio.run() would raise
+    # here. Run the coroutine in a fresh loop on a separate thread
+    # instead, so this function stays safely callable either way.
+    result_holder = {}
+
+    def _runner():
+        result_holder["result"] = asyncio.run(coro)
+
+    import threading
+    t = threading.Thread(target=_runner, daemon=True)
+    t.start()
+    t.join()
+    return result_holder.get("result")
+
+
 def _push_websocket_update(scan_id: str, payload: dict) -> None:
-    
+
     user_id = None
     try:
         user_id = _get_scan_fields(scan_id).get("user_id")
@@ -86,7 +131,7 @@ def _push_websocket_update(scan_id: str, payload: dict) -> None:
         logger.exception("[%s] Could not look up user_id for dashboard broadcast", scan_id)
 
     try:
-        asyncio.run(websocket_manager.broadcast_risk_update(scan_id, payload, user_id=user_id))
+        _run_coroutine_sync(websocket_manager.broadcast_risk_update(scan_id, payload, user_id=user_id))
     except Exception:
         logger.exception("[%s] WebSocket push failed (non-fatal)", scan_id)
 
@@ -99,7 +144,7 @@ def _push_websocket_update(scan_id: str, payload: dict) -> None:
     acks_late=True,
 )
 def risk_fusion_task(self, scan_id: str):
-    
+
     logger.info("[%s] Stage 4 (risk_fusion) started", scan_id)
     _mark_status(scan_id, "risk_fusion_running")
 
@@ -142,13 +187,13 @@ def risk_fusion_task(self, scan_id: str):
     _push_websocket_update(scan_id, risk_report)
 
     logger.info(
-        "[%s] risk_fusion complete - score=%s severity=%s",
+        "[%s] risk_fusion complete - score=%s severity=%s%s",
         scan_id,
         risk_report.get("risk_score"),
         risk_report.get("severity"),
+        " (PLACEHOLDER MODEL)" if risk_report.get("is_placeholder") else "",
     )
     _mark_status(scan_id, "risk_fusion_done")
-
 
     if risk_report.get("severity") in ALERT_SEVERITIES:
         from tasks.alert_pipeline import alert_pipeline_task

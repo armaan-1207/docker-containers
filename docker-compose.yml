@@ -213,21 +213,19 @@ services:
     mem_limit: "256m"
     cpus: "0.5"
 
-  # ---------------------------------------------------
+ # ---------------------------------------------------
   # 7. SANDBOX — Playwright Detonation Container
   #    Stage 5: Full phishing sandbox detonation
   #    Run-per-job (not persistent) — invoked by celery_worker
   #    via `docker run` or `docker compose run sandbox <URL>`
   #    Writes results atomically to shared_scans volume
-  #
-  #    Build context points to the sandboxV3 repo in Downloads.
-  #    If you move the repo, update the context path below.
   # ---------------------------------------------------
   sandbox:
     container_name: aegis_sandbox
     build:
-      context: C:/Users/armaa/Downloads/phishing-sandboxV3
+      context: ./sandbox
       dockerfile: docker/Dockerfile
+    image: aegis-sandbox:latest
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
@@ -247,7 +245,6 @@ services:
     # Use: docker compose run --rm sandbox <URL> --output-dir /app/output
     profiles:
       - sandbox
-
 # -------------------------------------------------------
 # VOLUMES
 # -------------------------------------------------------
