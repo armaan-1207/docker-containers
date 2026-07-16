@@ -61,8 +61,6 @@ def _load_json(path: str) -> dict:
 
 
 def _get_scan_fields(scan_id: str) -> dict:
-    """Small DB lookup used to get fields (url, user_id) that never made it
-    into the JSON artifacts on disk."""
     with get_db_session() as db:
         scan = db.query(Scan).filter(Scan.id == scan_id).first()
         if scan is None:
@@ -92,24 +90,11 @@ def _get_cyberintel(scan_id: str, browser_features: dict) -> dict:
 
 
 def _run_coroutine_sync(coro):
-    """
-    Runs `coro` to completion from synchronous code, whether or not an
-    event loop is already running in this thread. Prefer this over a
-    bare asyncio.run() call anywhere a function might end up invoked
-    from more than one execution context (sync Celery task today,
-    potentially an async caller later).
-    """
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        # No loop running in this thread -- the common case for a
-        # prefork Celery worker. Safe to just asyncio.run().
         return asyncio.run(coro)
 
-    # A loop IS already running in this thread (e.g. gevent/eventlet
-    # pool, or called from async code) -- asyncio.run() would raise
-    # here. Run the coroutine in a fresh loop on a separate thread
-    # instead, so this function stays safely callable either way.
     result_holder = {}
 
     def _runner():
@@ -157,7 +142,10 @@ def risk_fusion_task(self, scan_id: str):
         cyberintel = _get_cyberintel(scan_id, browser_features)
     except Exception as exc:
         logger.exception("[%s] Missing inputs for risk fusion", scan_id)
-        _mark_status(scan_id, "risk_fusion_failed")
+        if self.request.retries >= self.max_retries:
+            _mark_status(scan_id, "risk_fusion_failed")
+        else:
+            _mark_status(scan_id, "risk_fusion_retrying")
         raise self.retry(exc=exc)
 
     try:
@@ -170,20 +158,20 @@ def risk_fusion_task(self, scan_id: str):
         )
     except Exception as exc:
         logger.exception("[%s] RiskFusionEngine.compute() failed", scan_id)
-        _mark_status(scan_id, "risk_fusion_failed")
+        if self.request.retries >= self.max_retries:
+            _mark_status(scan_id, "risk_fusion_failed")
+        else:
+            _mark_status(scan_id, "risk_fusion_retrying")
         raise self.retry(exc=exc)
 
     risk_report["scan_id"] = scan_id
 
-    # Persist to disk (audit trail)
     report_path = os.path.join(scan_dir, "risk_report.json")
     with open(report_path, "w") as f:
         json.dump(risk_report, f, indent=2, default=str)
 
-    # 1. Redis cache
     _redis_client.set(f"risk:{scan_id}", json.dumps(risk_report, default=str))
 
-    # 2. WebSocket push - "Done" from the user's point of view
     _push_websocket_update(scan_id, risk_report)
 
     logger.info(

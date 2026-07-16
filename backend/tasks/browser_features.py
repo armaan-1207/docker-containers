@@ -12,12 +12,10 @@ from celery.utils.log import get_task_logger
 from celery_worker import celery
 from config import settings
 
-# --- AI engine calls -------------------------------------------------------
 from ai_engine.ocr import extract_text
 from ai_engine.vision import analyze_screenshot
 from ai_engine.dom_extractor import extract_features
 
-# --- persistence helpers ----------------------------------------------------
 from database.database import get_db_session
 from database.models import Scan
 
@@ -29,7 +27,6 @@ def _scan_dir(scan_id: str) -> str:
 
 
 def _mark_status(scan_id: str, status: str) -> None:
-   
     try:
         with get_db_session() as db:
             scan = db.query(Scan).filter(Scan.id == scan_id).first()
@@ -48,7 +45,7 @@ def _mark_status(scan_id: str, status: str) -> None:
     acks_late=True,
 )
 def browser_features_task(self, scan_id: str):
-    
+
     logger.info("[%s] Stage 1 (browser_features) started", scan_id)
     _mark_status(scan_id, "browser_features_running")
 
@@ -61,7 +58,6 @@ def browser_features_task(self, scan_id: str):
         _mark_status(scan_id, "browser_features_failed")
         raise FileNotFoundError(f"browser.png / browser.html not found for scan {scan_id}")
 
-
     scan_url = ""
     try:
         with get_db_session() as db:
@@ -72,18 +68,18 @@ def browser_features_task(self, scan_id: str):
         logger.exception("[%s] Could not look up scan.url", scan_id)
 
     try:
-        # 1. OCR
         ocr_text = extract_text(png_path)
-
-        # 2. Vision
         vision_result = analyze_screenshot(png_path)
-
-        # 3. DOM feature extraction
         dom_features = extract_features(html_path, final_url=scan_url)
-
     except Exception as exc:
         logger.exception("[%s] Feature extraction failed", scan_id)
-        _mark_status(scan_id, "browser_features_failed")
+        # Only mark permanently "failed" once retries are actually
+        # exhausted -- otherwise a transient failure that recovers on
+        # attempt 2 leaves the DB showing "failed" for no reason.
+        if self.request.retries >= self.max_retries:
+            _mark_status(scan_id, "browser_features_failed")
+        else:
+            _mark_status(scan_id, "browser_features_retrying")
         raise self.retry(exc=exc)
 
     browser_features = {
@@ -101,8 +97,6 @@ def browser_features_task(self, scan_id: str):
     logger.info("[%s] browser_features.json written", scan_id)
     _mark_status(scan_id, "browser_features_done")
 
-    # 4. Queue Stage 2 - Sandbox
-    # Local import avoids a circular import between the two task modules.
     from tasks.sandbox_analysis import sandbox_analysis_task
     sandbox_analysis_task.delay(scan_id)
 

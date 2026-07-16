@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -10,6 +12,8 @@ from schemas.stage2 import Stage2Request, Stage2Response
 
 from services.quickscan import run_quickscan
 from services.stage2_analysis import run_stage2_analysis
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
 
@@ -24,10 +28,16 @@ async def quick_scan(
         result = await run_quickscan(payload=payload, user=current_user, db=db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        # Full details go to the server log only -- a raw str(e) in the
+        # HTTP response can leak internal paths, DB errors, or stack
+        # info to the caller.
+        logger.exception(
+            "Quick scan failed for url=%s user_id=%s", payload.url, current_user.id
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Quick scan failed: {str(e)}",
+            detail="Quick scan failed. Please try again shortly.",
         )
 
     return result
@@ -55,10 +65,13 @@ async def stage2_scan(
         result = await run_stage2_analysis(payload=payload, user=current_user, db=db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            "Stage 2 scan failed for url=%s user_id=%s", payload.url, current_user.id
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Stage 2 scan failed: {str(e)}",
+            detail="Stage 2 scan failed. Please try again shortly.",
         )
 
     return result

@@ -1,28 +1,6 @@
 """
 tasks/sandbox_analysis.py
 ==========================
-
-PATCH NOTES (integration fix):
-  The previous implementation POSTed to f"{SANDBOX_SERVICE_URL}/detonate"
-  -- but the sandbox container (see sandbox/README.md and
-  sandbox/docker/Dockerfile) is explicitly a single-shot CLI tool with
-  NO persistent API service, no port, and no /detonate route. That
-  request would fail on every real invocation.
-
-  Switched to "Option A" from sandbox/DOCKER_ARCHITECTURE_IDEATION.md:
-  spawn a fresh sandbox container per job via the Docker socket (already
-  mounted read-only into this worker -- see docker-compose.yml), mount
-  the same shared_scans volume the sandbox writes into, and read the
-  atomically-written scan_<id>.json + screenshots back off it once the
-  container exits. This matches the container-per-job isolation pattern
-  the rest of this repo already documents and gives up nothing compared
-  to the old (nonexistent) HTTP path.
-
-  If you'd rather use Option B (import backend/phishing_sandbox_scan.py
-  directly into this worker image and call scan_url() in-process --
-  see DOCKER_ARCHITECTURE_IDEATION.md's tradeoffs table), replace
-  _call_sandbox() below with a direct `await scan_url(...)` call and
-  drop the subprocess/Docker-socket dependency entirely.
 """
 
 import asyncio
@@ -30,6 +8,7 @@ import glob
 import json
 import logging
 import os
+from typing import Tuple
 
 from celery_worker import celery
 from config import settings
@@ -66,15 +45,6 @@ def _get_scan_url(scan_id: str) -> str:
 
 
 async def _run_sandbox_container(scan_id: str, target_url: str, timeout_sec: int) -> None:
-    """
-    Spawns `docker run --rm -v shared_scans:/app/output <image> <url>
-    --output-dir /app/output --request-id <scan_id>` and waits for it to
-    exit. The sandbox container writes scan_<request_id>.json (using
-    ITS OWN internally-generated scan_id, stamped with our request_id)
-    atomically into the shared volume -- we locate that file by request_id
-    rather than assuming any particular scan_id, since the sandbox
-    container's scan_id is independent of ours.
-    """
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{SHARED_VOLUME_NAME}:/app/output",
@@ -105,13 +75,11 @@ async def _run_sandbox_container(scan_id: str, target_url: str, timeout_sec: int
     logger.debug("[%s] sandbox container stdout: %s", scan_id, stdout.decode(errors="ignore")[:500])
 
 
-def _find_result_by_request_id(scan_id: str) -> dict:
+def _find_result_by_request_id(scan_id: str) -> Tuple[str, dict]:
     """
-    The sandbox container's OWN scan_id (not ours) is embedded in its
-    output filename (scan_<its_id>.json), but every result's
-    scans.request_id field is stamped with the --request-id we passed
-    in (our scan_id) -- see phishing_sandbox_scan.py's scan_url(). Scan
-    the shared dir's JSON files for the one whose request_id matches.
+    Returns (json_path, data) for the sandbox result whose
+    scans.request_id matches our scan_id. Raises FileNotFoundError if
+    no match is found.
     """
     candidates = glob.glob(os.path.join(settings.SHARED_DIR, "scan_*.json"))
     for path in candidates:
@@ -121,8 +89,30 @@ def _find_result_by_request_id(scan_id: str) -> dict:
         except (json.JSONDecodeError, OSError):
             continue
         if data.get("scans", {}).get("request_id") == scan_id:
-            return data
+            return path, data
     raise FileNotFoundError(f"No sandbox result found for scan {scan_id} in {settings.SHARED_DIR}")
+
+
+def _cleanup_sandbox_root_files(json_path: str, sandbox_result: dict) -> None:
+    """
+    The sandbox container writes its own JSON and BOTH screenshots flat
+    into the shared volume ROOT (not the per-scan subdirectory) --
+    only the homepage screenshot ever gets moved into scan_dir by the
+    caller below. Left alone, the raw JSON and the full-page screenshot
+    accumulate at the volume root forever, across every scan ever run.
+    Delete them once we've extracted what we actually need.
+    """
+    candidates = [json_path]
+    full_page_path = sandbox_result.get("screenshots", {}).get("fullpage_screenshot_path")
+    if full_page_path:
+        candidates.append(full_page_path)
+
+    for path in candidates:
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            logger.warning("Could not remove leftover sandbox file %s", path, exc_info=True)
 
 
 def _call_sandbox(scan_id: str) -> dict:
@@ -130,7 +120,9 @@ def _call_sandbox(scan_id: str) -> dict:
     timeout_sec = getattr(settings, "SANDBOX_TIMEOUT_SEC", 120)
 
     asyncio.run(_run_sandbox_container(scan_id, target_url, timeout_sec))
-    return _find_result_by_request_id(scan_id)
+    json_path, sandbox_result = _find_result_by_request_id(scan_id)
+    sandbox_result["_source_json_path"] = json_path  # internal only, stripped before persisting
+    return sandbox_result
 
 
 @celery.task(
@@ -154,20 +146,18 @@ def sandbox_analysis_task(self, scan_id: str):
             raise ValueError(f"Sandbox returned an error: {sandbox_result['error']}")
     except Exception as exc:
         logger.exception("[%s] Sandbox call failed", scan_id)
-        _mark_status(scan_id, "sandbox_analysis_failed")
+        if self.request.retries >= self.max_retries:
+            _mark_status(scan_id, "sandbox_analysis_failed")
+        else:
+            _mark_status(scan_id, "sandbox_analysis_retrying")
         raise self.retry(exc=exc)
 
-    # Persist metadata (the full sandbox telemetry -- screenshots are
-    # already sitting in the shared volume next to the JSON, written
-    # atomically by the sandbox container itself).
+    source_json_path = sandbox_result.pop("_source_json_path", None)
+
     metadata_path = os.path.join(scan_dir, "sandbox_metadata.json")
     with open(metadata_path, "w") as f:
         json.dump(sandbox_result, f, indent=2, default=str)
 
-    # Record screenshot paths so downstream stages (consistency.py) can
-    # find them -- the sandbox container already wrote these into the
-    # shared volume; this just points sandbox.png / sandbox.html-shaped
-    # consumers at the sandbox's own output naming.
     screenshots = sandbox_result.get("screenshots", {})
     for key, dst_name in (("homepage_screenshot_path", "sandbox.png"),):
         src = screenshots.get(key)
@@ -176,10 +166,12 @@ def sandbox_analysis_task(self, scan_id: str):
             if os.path.abspath(src) != os.path.abspath(dst):
                 os.replace(src, dst)
 
+    if source_json_path:
+        _cleanup_sandbox_root_files(source_json_path, sandbox_result)
+
     logger.info("[%s] sandbox artifacts written", scan_id)
     _mark_status(scan_id, "sandbox_analysis_done")
 
-    # Queue Stage 3 - Consistency
     from tasks.consistency import consistency_task
     consistency_task.delay(scan_id)
 

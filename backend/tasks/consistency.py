@@ -45,7 +45,7 @@ def _load_json(path: str) -> dict:
     acks_late=True,
 )
 def consistency_task(self, scan_id: str):
-    
+
     logger.info("[%s] Stage 3 (consistency) started", scan_id)
     _mark_status(scan_id, "consistency_running")
 
@@ -64,16 +64,21 @@ def consistency_task(self, scan_id: str):
         }
     except Exception as exc:
         logger.exception("[%s] Missing artifacts for consistency check", scan_id)
-        _mark_status(scan_id, "consistency_failed")
+        if self.request.retries >= self.max_retries:
+            _mark_status(scan_id, "consistency_failed")
+        else:
+            _mark_status(scan_id, "consistency_retrying")
         raise self.retry(exc=exc)
 
     try:
-        # Task starts the work; engine does the work.
         engine = ConsistencyEngine()
         consistency_report = engine.analyze(browser_artifacts, sandbox_artifacts)
     except Exception as exc:
         logger.exception("[%s] ConsistencyEngine.analyze() failed", scan_id)
-        _mark_status(scan_id, "consistency_failed")
+        if self.request.retries >= self.max_retries:
+            _mark_status(scan_id, "consistency_failed")
+        else:
+            _mark_status(scan_id, "consistency_retrying")
         raise self.retry(exc=exc)
 
     report_path = os.path.join(scan_dir, "consistency_report.json")
@@ -83,7 +88,6 @@ def consistency_task(self, scan_id: str):
     logger.info("[%s] consistency_report.json written", scan_id)
     _mark_status(scan_id, "consistency_done")
 
-    # Queue Stage 4 - Risk Fusion
     from tasks.risk_fusion import risk_fusion_task
     risk_fusion_task.delay(scan_id)
 

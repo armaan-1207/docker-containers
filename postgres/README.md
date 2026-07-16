@@ -9,7 +9,7 @@ Primary relational datastore for the AEGIS platform.
 
 | Table | Key columns | Purpose |
 |-------|-------------|---------|
-| `users` | id, email, hashed_password, role, created_at | Auth + user management |
+| `users` | id, email, hashed_password, is_active, created_at | Auth + user management |
 | `scans` | id, user_id, url, status, created_at | Scan lifecycle tracking |
 | `incidents` | id, scan_id, severity, risk_score, summary | HIGH/CRITICAL alerts |
 | `iocs` | id, incident_id, ioc_type, value | Extracted indicators (IPs, domains, hashes) |
