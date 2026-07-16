@@ -175,6 +175,10 @@ def _cleanup_sandbox_root_files(json_path: str, sandbox_result: dict) -> None:
     candidates = [json_path]
     full_page_path = sandbox_result.get("screenshots", {}).get("fullpage_screenshot_path")
     if full_page_path:
+        if not os.path.exists(full_page_path):
+            worker_full = os.path.join(settings.SHARED_DIR, os.path.basename(full_page_path))
+            if os.path.exists(worker_full):
+                full_page_path = worker_full
         candidates.append(full_page_path)
 
     for path in candidates:
@@ -198,6 +202,7 @@ def _call_sandbox(scan_id: str) -> dict:
 @celery.task(
     bind=True,
     name="tasks.sandbox_analysis",
+    queue="sandbox",
     max_retries=3,
     default_retry_delay=15,
     acks_late=True,
@@ -231,6 +236,10 @@ def sandbox_analysis_task(self, scan_id: str):
     screenshots = sandbox_result.get("screenshots", {})
     for key, dst_name in (("homepage_screenshot_path", "sandbox.png"),):
         src = screenshots.get(key)
+        if src and not os.path.exists(src):
+            worker_src = os.path.join(settings.SHARED_DIR, os.path.basename(src))
+            if os.path.exists(worker_src):
+                src = worker_src
         if src and os.path.exists(src):
             dst = os.path.join(scan_dir, dst_name)
             if os.path.abspath(src) != os.path.abspath(dst):

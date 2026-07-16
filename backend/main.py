@@ -26,11 +26,10 @@ from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from jose import JWTError
 
 from api.routes import router
 from auth.routes import router as auth_router
-from auth.jwt import decode_access_token
+from auth.jwt import JWTError, decode_access_token
 from config import settings
 from database.database import get_db_session
 from database.models import Scan

@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     libzbar0 \
     curl \
+    docker-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
@@ -45,7 +46,7 @@ COPY --chown=aegis:aegis . .
 
 # Shared volume mount point — Backend writes screenshots here,
 # Celery worker and Sandbox container read from this same volume.
-RUN mkdir -p /shared/scans && chown -R aegis:aegis /shared/scans
+RUN mkdir -p /shared/scans && chown -R aegis:aegis /shared/scans && chmod 1777 /shared/scans
 VOLUME ["/shared/scans"]
 
 # Models directory (LightGBM .pkl lives here)

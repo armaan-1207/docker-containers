@@ -58,6 +58,7 @@ def _load_json(path: str) -> dict:
 @celery.task(
     bind=True,
     name="tasks.consistency",
+    queue="default",
     max_retries=2,
     default_retry_delay=10,
     acks_late=True,

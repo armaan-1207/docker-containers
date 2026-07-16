@@ -45,12 +45,16 @@ def _scan_dir(scan_id: str) -> str:
     return os.path.join(settings.SHARED_DIR, scan_id)
 
 
-def _mark_status(scan_id: str, status: str) -> None:
+def _mark_status(scan_id: str, status: str, risk_score: float = None, severity: str = None) -> None:
     try:
         with get_db_session() as db:
             scan = db.query(Scan).filter(Scan.id == scan_id).first()
             if scan:
                 scan.status = status
+                if risk_score is not None:
+                    scan.risk_score = risk_score
+                if severity is not None:
+                    scan.severity = severity
                 db.commit()
     except Exception:
         logger.exception("Failed to update scan status to %s for %s", status, scan_id)
@@ -125,6 +129,7 @@ def _push_websocket_update(scan_id: str, payload: dict) -> None:
 @celery.task(
     bind=True,
     name="tasks.risk_fusion",
+    queue="default",
     max_retries=2,
     default_retry_delay=10,
     acks_late=True,
@@ -195,7 +200,12 @@ def risk_fusion_task(self, scan_id: str):
         risk_report.get("severity"),
         " (PLACEHOLDER MODEL)" if risk_report.get("is_placeholder") else "",
     )
-    _mark_status(scan_id, "risk_fusion_done")
+    _mark_status(
+        scan_id,
+        "risk_fusion_done",
+        risk_score=risk_report.get("risk_score"),
+        severity=risk_report.get("severity"),
+    )
 
     is_placeholder = risk_report.get("is_placeholder", True)  # fail closed: unknown -> treat as placeholder
     if risk_report.get("severity") in ALERT_SEVERITIES and not is_placeholder:

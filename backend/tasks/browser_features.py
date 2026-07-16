@@ -40,6 +40,7 @@ def _mark_status(scan_id: str, status: str) -> None:
 @celery.task(
     bind=True,
     name="tasks.browser_features",
+    queue="default",
     max_retries=3,
     default_retry_delay=10,
     acks_late=True,

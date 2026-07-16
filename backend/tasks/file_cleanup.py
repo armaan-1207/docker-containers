@@ -53,6 +53,7 @@ _SECONDS_PER_DAY = 86_400
 @celery.task(
     bind=True,
     name="tasks.file_cleanup",
+    queue="default",
     max_retries=1,
     acks_late=True,
 )

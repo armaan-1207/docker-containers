@@ -113,6 +113,7 @@ def _send_slack_notification(scan_id: str, risk_report: dict) -> None:
 @celery.task(
     bind=True,
     name="tasks.alert_pipeline",
+    queue="alerts",
     max_retries=3,
     default_retry_delay=10,
     acks_late=True,

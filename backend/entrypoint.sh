@@ -9,9 +9,10 @@ set -e
 
 echo "[entrypoint] Waiting for PostgreSQL..."
 until python -c "
-import psycopg2, os, sys
+import psycopg2, sys
+from config import settings
 try:
-    psycopg2.connect(os.environ['DATABASE_URL'].replace('+psycopg2', ''))
+    psycopg2.connect(settings.DATABASE_URL.replace('+psycopg2', ''))
     print('PostgreSQL is ready.')
 except Exception as e:
     print(f'Not ready: {e}', file=sys.stderr)

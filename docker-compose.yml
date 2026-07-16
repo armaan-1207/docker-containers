@@ -183,9 +183,9 @@ services:
       CONFIGS: 0
       DISTRIBUTION: 0
       EXEC: 0
-      IMAGES: 0
+      IMAGES: 1
       INFO: 0
-      NETWORKS: 0
+      NETWORKS: 1
       NODES: 0
       PLUGINS: 0
       SECRETS: 0
@@ -287,13 +287,13 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    pids_limit: 512
     shm_size: "1gb"
     deploy:
       resources:
         limits:
           cpus: "1.0"
           memory: 2048M
+          pids: 512
         reservations:
           cpus: "0.25"
           memory: 512M

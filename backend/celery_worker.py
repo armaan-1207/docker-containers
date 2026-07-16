@@ -48,6 +48,15 @@ celery.conf.update(
     result_expires=3600,
     # Suppress Celery 5.x deprecation warning — explicit setting for 6.0 compat
     broker_connection_retry_on_startup=True,
+    task_default_queue="default",
+    task_routes={
+        "tasks.browser_features": {"queue": "default"},
+        "tasks.sandbox_analysis": {"queue": "sandbox"},
+        "tasks.consistency": {"queue": "default"},
+        "tasks.risk_fusion": {"queue": "default"},
+        "tasks.alert_pipeline": {"queue": "alerts"},
+        "tasks.file_cleanup": {"queue": "default"},
+    },
 )
 
 if __name__ == "__main__":

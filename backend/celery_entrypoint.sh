@@ -17,20 +17,11 @@ set -e
 
 echo "[celery-entrypoint] Waiting for Redis..."
 until python -c "
-import os, sys, re
-
-redis_url = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
-redis_password = os.environ.get('REDIS_PASSWORD', '')
-
-# Inject password into URL if REDIS_PASSWORD is set and URL has no credentials.
-# Matches URLs like redis://redis:6379/0 (no creds) and injects :PASSWORD@
-# to produce redis://:PASSWORD@redis:6379/0
-if redis_password and '://:' not in redis_url and '@' not in redis_url:
-    redis_url = re.sub(r'redis://', f'redis://:{redis_password}@', redis_url, count=1)
-
+import sys
+from config import settings
 try:
     import redis
-    r = redis.Redis.from_url(redis_url, socket_connect_timeout=3)
+    r = redis.Redis.from_url(settings.REDIS_URL, socket_connect_timeout=3)
     r.ping()
     print('Redis is ready.')
 except Exception as e:
@@ -43,10 +34,10 @@ done
 
 echo "[celery-entrypoint] Waiting for PostgreSQL..."
 until python -c "
-import psycopg2, os, sys
+import psycopg2, sys
+from config import settings
 try:
-    url = os.environ.get('DATABASE_URL', '').replace('+psycopg2', '')
-    psycopg2.connect(url)
+    psycopg2.connect(settings.DATABASE_URL.replace('+psycopg2', ''))
     print('PostgreSQL is ready.')
 except Exception as e:
     print(f'Not ready: {e}', file=sys.stderr)

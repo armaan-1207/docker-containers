@@ -36,12 +36,21 @@ browser_features  →  sandbox_analysis  →  consistency  →  risk_fusion  →
 ## Environment variables (backend/.env)
 ```
 DATABASE_URL=postgresql+psycopg2://aegis_user:aegis_pass@postgres:5432/aegis_db
+AEGIS_DB_PASSWORD=<change-this-32-chars-min>
 REDIS_URL=redis://redis:6379/0
-SECRET_KEY=<change-this>
+REDIS_PASSWORD=<change-this-32-chars-min>
+SECRET_KEY=<change-this-32-chars-min>
+SANDBOX_NETWORK=dockercontainers_sandbox_net
 VIRUSTOTAL_API_KEY=<your-key>
 GOOGLE_SAFE_BROWSING_API_KEY=<your-key>
 SHARED_DIR=/shared/scans
 ```
+
+> **Note on Database Password Drift & Troubleshooting:**
+> If you encounter `FATAL: password authentication failed for user "aegis_user"`, check:
+> 1. Whether `AEGIS_DB_PASSWORD` in `backend/.env` matches the password embedded in `DATABASE_URL` and root `.env`.
+> 2. If you updated `.env`, ensure you recreate the container (`docker compose up -d --force-recreate backend`) and that `backend/.dockerignore` excludes `.env` to prevent stale secrets in Docker image layers.
+> 3. Verify no host OS environment variable (`env | grep AEGIS_DB_PASSWORD` / Windows Environment Variables) is overriding the Compose environment.
 
 ## Docker image
 Multi-stage build:

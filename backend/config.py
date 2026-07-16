@@ -214,7 +214,7 @@ class Settings(BaseSettings):
     ARTIFACT_RETENTION_DAYS: int = 14
 
     SANDBOX_IMAGE: str = "aegis-sandbox:latest"
-    SHARED_SCANS_VOLUME: str = "shared_scans"
+    SHARED_SCANS_VOLUME: str = "dockercontainers_shared_scans"
     SANDBOX_TIMEOUT_SEC: int = 120
 
     # -------------------------
@@ -247,10 +247,11 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-if not settings.DEBUG and settings.SECRET_KEY == "change-this-in-production":
-    raise RuntimeError(
-        "SECRET_KEY is still the default placeholder value while DEBUG=False. "
-        "Set a real 32+ char random SECRET_KEY in backend/.env before running "
-        "in production — this key signs every JWT, so leaving the default "
-        "means anyone can forge valid auth tokens."
-    )
+if not settings.DEBUG:
+    for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD"):
+        val = getattr(settings, secret_name, "")
+        if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or len(val) < 32:
+            raise RuntimeError(
+                f"{secret_name} is invalid, weak, or still holds a default placeholder value ('{val}') while DEBUG=False. "
+                f"Set a strong random secret (32+ characters) in backend/.env before running in production."
+            )

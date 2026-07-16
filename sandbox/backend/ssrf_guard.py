@@ -63,7 +63,7 @@ def _is_blocked_ip(ip_str):
         return True  # unparseable -> fail closed
 
 
-    mapped = ip.ipv4_mapped
+    mapped = getattr(ip, "ipv4_mapped", None)
     if mapped is not None:
         ip = mapped
 

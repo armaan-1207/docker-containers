@@ -1545,6 +1545,10 @@ def _atomic_write_json(path, data):
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2, default=str)
         os.rename(tmp_path, path)
+        try:
+            os.chmod(path, 0o664)
+        except OSError:
+            pass
     except Exception:
         try:
             os.unlink(tmp_path)
@@ -1610,6 +1614,10 @@ def main():
             if src and os.path.exists(src):
                 dst = os.path.join(args.output_dir, f"scan_{scan_id}{suffix}")
                 shutil.move(src, dst)
+                try:
+                    os.chmod(dst, 0o664)
+                except OSError:
+                    pass
                 result["screenshots"][key] = dst
 
         json_path = os.path.join(args.output_dir, f"scan_{scan_id}.json")
