@@ -26,6 +26,7 @@ kombu==5.3.4
 # --- HTTP Client ---
 httpx==0.27.0
 aiohttp==3.9.5
+requests==2.32.3
 
 # --- Pydantic / Settings ---
 pydantic==2.8.2
@@ -41,11 +42,24 @@ joblib==1.4.2
 Pillow==10.4.0
 pytesseract==0.3.13
 opencv-python-headless==4.10.0.84
+# imagehash: used by consistency_engine for perceptual screenshot hashing (pHash)
+# Was missing from requirements — imported by consistency_engine.py
+imagehash==4.3.1
+
+# --- Text Similarity ---
+# python-Levenshtein: used by consistency_engine for OCR text comparison
+# Was missing from requirements — imported by consistency_engine (absolute_implementation_guide spec)
+python-Levenshtein==0.25.1
 
 # --- Threat Intelligence ---
-requests==2.32.3
 dnspython==2.6.1
 tldextract==5.1.2
+
+# --- HTML Parsing (DOM feature extraction) ---
+# beautifulsoup4: imported by ai_engine/dom_extractor.py — was missing from
+# requirements.txt, causing _HAS_BS4=False and empty DOM features on every scan.
+beautifulsoup4==4.12.3
+lxml==5.2.2          # fast parser backend for BeautifulSoup
 
 # --- Utilities ---
 python-dotenv==1.0.1

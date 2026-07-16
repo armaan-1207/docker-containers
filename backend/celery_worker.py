@@ -32,6 +32,7 @@ celery = Celery(
         "tasks.consistency",
         "tasks.risk_fusion",
         "tasks.alert_pipeline",
+        "tasks.file_cleanup",     # periodic artifact retention (finding #8 fix)
     ],
 )
 
@@ -52,4 +53,3 @@ celery.conf.update(
 if __name__ == "__main__":
     # Run via: celery -A celery_worker worker --loglevel=info
     celery.start()
-

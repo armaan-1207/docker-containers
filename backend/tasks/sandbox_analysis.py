@@ -1,6 +1,26 @@
 """
 tasks/sandbox_analysis.py
 ==========================
+Stage 2 of the AEGIS Celery pipeline: detonates a URL in an isolated
+Playwright sandbox container and waits for the result artifacts.
+
+Security hardening (finding #3 fix):
+  The Docker SDK/CLI now communicates with the sandbox container via the
+  docker_socket_proxy service (Tecnativa/docker-socket-proxy) rather than
+  the raw /var/run/docker.sock mount. The DOCKER_HOST environment variable
+  in the celery_worker container is set to tcp://docker_socket_proxy:2375,
+  so `docker run` commands issued here automatically route through the proxy
+  instead of the host daemon socket.
+
+  The proxy only exposes CONTAINERS=1 and POST=1 — enough to create and
+  start the sandbox container but nothing else (no exec, no image pull,
+  no host-level escape vectors).
+
+Network isolation (finding #9 fix):
+  The sandbox container is attached to `sandbox_net` only (defined in
+  docker-compose.yml). It cannot reach aegis_net, Postgres, or Redis even
+  if Chromium is fully compromised. The Celery worker that invokes it lives
+  on aegis_net and communicates only via the shared_scans volume.
 """
 
 import asyncio
@@ -17,8 +37,11 @@ from database.models import Scan
 
 logger = logging.getLogger(__name__)
 
-SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", "aegis-sandbox:latest")
-SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", "shared_scans")
+SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", settings.SANDBOX_IMAGE)
+SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", settings.SHARED_SCANS_VOLUME)
+
+# Network to attach the sandbox container to (must be isolated from aegis_net)
+SANDBOX_NETWORK = os.environ.get("SANDBOX_NETWORK", "project-docker-containers_sandbox_net")
 
 
 def _scan_dir(scan_id: str) -> str:
@@ -45,8 +68,25 @@ def _get_scan_url(scan_id: str) -> str:
 
 
 async def _run_sandbox_container(scan_id: str, target_url: str, timeout_sec: int) -> None:
+    """
+    Spawn the aegis-sandbox container via `docker run`.
+
+    The Docker client inside the Celery worker reads DOCKER_HOST from the
+    environment (set to tcp://docker_socket_proxy:2375 in docker-compose.yml)
+    so all Docker API calls are routed through the scoped socket proxy rather
+    than the raw host socket.
+
+    Security: sandbox container is attached to SANDBOX_NETWORK (sandbox_net)
+    which has zero routing path to aegis_net / Postgres / Redis.
+    """
     cmd = [
         "docker", "run", "--rm",
+        "--network", SANDBOX_NETWORK,           # isolated network (finding #9)
+        "--cap-drop", "ALL",                    # drop all Linux capabilities
+        "--security-opt", "no-new-privileges:true",
+        "--pids-limit", "512",
+        "--memory", "2g",
+        "--cpus", "1.0",
         "-v", f"{SHARED_VOLUME_NAME}:/app/output",
         SANDBOX_IMAGE,
         target_url,

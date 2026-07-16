@@ -1,24 +1,32 @@
 # =======================================================
-# AEGIS — Master Docker Compose
-# 7 containers + 1 shared volume
+# AEGIS — Master Docker Compose  (v2 — Security Hardened)
+# 8 containers + 1 socket proxy + shared volumes
 #
 # Containers:
-#   nginx          — Receptionist (port 80 → backend:8000)
-#   backend        — FastAPI / Uvicorn (Unicorn receiver → FastAPI router)
-#   redis          — Broker + result backend for Celery
-#   postgres       — Primary datastore (users, scans, incidents, IOCs)
-#   celery_worker  — Task runner (OCR, vision, sandbox, risk_fusion, alerts)
-#   celery_beat    — Periodic scheduler (consistency, risk, alerts)
-#   sandbox        — Playwright detonation container (run-per-job)
+#   nginx              — Receptionist (port 80 → 443, terminates TLS)
+#   backend            — FastAPI / Uvicorn
+#   redis              — Broker + result backend + final verdict cache
+#   postgres           — Primary datastore (users, scans, incidents, IOCs)
+#   celery_worker      — Task runner (OCR, vision, sandbox, risk_fusion, alerts)
+#   celery_beat        — Periodic scheduler (file cleanup, health sweeps)
+#   docker_socket_proxy— Scoped Docker API proxy (replaces raw socket mount)
+#   sandbox            — Playwright detonation container (isolated network)
 #
-# Shared Volume:
-#   shared_scans   — Backend writes screenshots, Sandbox reads/writes results
+# Networks:
+#   aegis_net     — Internal bridge for all core services
+#   sandbox_net   — Isolated bridge for sandbox only (no route to aegis_net)
+#
+# Shared Volumes:
+#   shared_scans  — Backend writes screenshots; Sandbox writes results
+#   postgres_data — Persistent PostgreSQL data
+#   celery_beat_data — Celery Beat schedule persistence
 #
 # Usage:
 #   docker compose up -d          # start all persistent services
 #   docker compose logs -f        # follow all logs
 #   docker compose down           # stop and remove containers
 #   docker compose down -v        # also wipe volumes (DESTRUCTIVE)
+# =======================================================
 
 
 # -------------------------------------------------------
@@ -41,6 +49,17 @@ x-backend-common: &backend-common
       condition: service_healthy
   restart: unless-stopped
 
+# Resource limit anchor reused by all long-running services
+x-default-resources: &default-resources
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 1024M
+      reservations:
+        cpus: "0.25"
+        memory: 256M
+
 # -------------------------------------------------------
 # SERVICES
 # -------------------------------------------------------
@@ -48,8 +67,10 @@ services:
 
   # ---------------------------------------------------
   # 1. NGINX — Receptionist
-  #    Listens on host port 80 → proxies to backend:8000
+  #    HTTP (80) → redirects to HTTPS
+  #    HTTPS (443) → proxies to backend:8000
   #    Handles REST (/api/) and WebSocket (/ws) upgrades
+  #    Rate-limits auth, scan, and general API endpoints.
   # ---------------------------------------------------
   nginx:
     container_name: aegis_nginx
@@ -58,12 +79,14 @@ services:
       dockerfile: Dockerfile
     ports:
       - "80:80"
+      - "443:443"
     networks:
       - aegis_net
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
+    <<: *default-resources
 
   # ---------------------------------------------------
   # 2. BACKEND — FastAPI / Uvicorn
@@ -88,11 +111,21 @@ services:
       timeout: 10s
       start_period: 20s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+        reservations:
+          cpus: "0.5"
+          memory: 512M
 
   # ---------------------------------------------------
   # 3. REDIS — Broker + Cache
   #    Celery broker/result-backend
   #    Also used for URL scan result caching (1h TTL)
+  #    Also used for Redis Pub/Sub for WebSocket push
+  #    Password-protected; no persistence (pure cache/broker)
   # ---------------------------------------------------
   redis:
     container_name: aegis_redis
@@ -114,6 +147,7 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    <<: *default-resources
 
   # ---------------------------------------------------
   # 4. POSTGRES — Primary Datastore
@@ -142,13 +176,73 @@ services:
       retries: 10
       start_period: 10s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   # ---------------------------------------------------
-  # 5. CELERY WORKER — Task Runner
+  # 5. DOCKER SOCKET PROXY — Scoped API gateway
+  #    Replaces the raw /var/run/docker.sock mount that
+  #    previously gave the Celery worker full host access
+  #    (Critical finding #3 from security review).
+  #
+  #    Only exposes the minimum API surface:
+  #      CONTAINERS=1   → list/inspect containers
+  #      POST=1         → create + start containers
+  #    All other endpoints (exec, images, volumes, info,
+  #    swarm, etc.) are blocked at the proxy level.
+  #
+  #    Runs on its own internal network alongside aegis_net.
+  # ---------------------------------------------------
+  docker_socket_proxy:
+    container_name: aegis_socket_proxy
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      # Minimum permissions: create + start sandbox containers only
+      CONTAINERS: 1
+      POST: 1
+      # Explicitly deny everything else
+      AUTH: 0
+      BUILD: 0
+      COMMIT: 0
+      CONFIGS: 0
+      DISTRIBUTION: 0
+      EXEC: 0
+      IMAGES: 0
+      INFO: 0
+      NETWORKS: 0
+      NODES: 0
+      PLUGINS: 0
+      SECRETS: 0
+      SERVICES: 0
+      SESSION: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+      VOLUMES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - aegis_net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # ---------------------------------------------------
+  # 6. CELERY WORKER — Task Runner
   #    Executes pipeline tasks in order:
   #      browser_features → sandbox_analysis →
   #      consistency → risk_fusion → alert_pipeline
-  #    Has Docker socket access to spawn sandbox containers
+  #    Uses Docker SOCKET PROXY (not raw socket) to
+  #    spawn sandbox containers safely.
   # ---------------------------------------------------
   celery_worker:
     <<: *backend-common
@@ -160,28 +254,36 @@ services:
       --concurrency=2
       --queues=default,sandbox,alerts
       --hostname=worker@%h
-    volumes:
-      - shared_scans:/shared/scans
-      # SECURITY NOTE (unchanged from before — still open, see
-      # SECURITY_REVIEW.md Critical #4): the ":ro" flag only stops this
-      # container from replacing/unlinking the socket file itself — it
-      # does NOT restrict what commands can be issued over the socket.
-      # Still on the priority list to replace with a scoped Docker API
-      # proxy (Tecnativa/docker-socket-proxy).
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # Point Docker client at the socket proxy, not the raw socket
+      DOCKER_HOST: tcp://docker_socket_proxy:2375
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      docker_socket_proxy:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "celery -A celery_worker inspect ping --timeout 5 2>&1 | grep -c pong || exit 1"]
       interval: 45s
       timeout: 15s
       retries: 3
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3072M
+        reservations:
+          cpus: "0.5"
+          memory: 512M
 
   # ---------------------------------------------------
-  # 6. CELERY BEAT — Periodic Scheduler
-  #    Fires scheduled tasks:
-  #      consistency check  → every 15 min
-  #      risk fusion        → every hour
-  #      alert pipeline     → every 5 min
+  # 7. CELERY BEAT — Periodic Scheduler
+  #    Fires scheduled maintenance tasks:
+  #      file_cleanup: hourly purge of scan artifacts
+  #      older than ARTIFACT_RETENTION_DAYS (default 14d)
   # ---------------------------------------------------
   celery_beat:
     <<: *backend-common
@@ -201,13 +303,17 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    <<: *default-resources
 
- # ---------------------------------------------------
-  # 7. SANDBOX — Playwright Detonation Container
-  #    Stage 5: Full phishing sandbox detonation
-  #    Run-per-job (not persistent) — invoked by celery_worker
-  #    via `docker run` or `docker compose run sandbox <URL>`
-  #    Writes results atomically to shared_scans volume
+  # ---------------------------------------------------
+  # 8. SANDBOX — Playwright Detonation Container
+  #    Isolated: runs on sandbox_net only.
+  #    Has internet egress + shared_scans volume.
+  #    NO route to aegis_net → cannot reach Postgres or
+  #    Redis even if Chromium is exploited (finding #9).
+  #
+  #    Invoked per-job by celery_worker via docker run
+  #    (through the socket proxy). Not a persistent service.
   # ---------------------------------------------------
   sandbox:
     container_name: aegis_sandbox
@@ -220,27 +326,35 @@ services:
     volumes:
       - shared_scans:/app/output
     networks:
-      - aegis_net
-    # Security hardening (per sandbox's own docker-compose.yml)
+      - sandbox_net
+    # Security hardening — capability-dropped, no privilege escalation
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     pids_limit: 512
     shm_size: "1gb"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2048M
+        reservations:
+          cpus: "0.25"
+          memory: 512M
     # Sandbox is run-per-job; it exits after each scan.
     # Use: docker compose run --rm sandbox <URL> --output-dir /app/output
     profiles:
       - sandbox
+
 # -------------------------------------------------------
 # VOLUMES
 # -------------------------------------------------------
 volumes:
-
-  # Shared scan artefacts volume — the central shared bus:
-  #   backend      → writes screenshots (Stage 2)
-  #   celery_worker→ queues and monitors jobs
-  #   sandbox      → writes scan_<id>.json + .png results (Stage 5)
+  # Shared scan artefacts — the central shared bus:
+  #   backend       → writes screenshots (Stage 2)
+  #   celery_worker → queues and monitors jobs
+  #   sandbox       → writes scan_<id>.json + .png results
   shared_scans:
     driver: local
 
@@ -256,8 +370,20 @@ volumes:
 # NETWORKS
 # -------------------------------------------------------
 networks:
+  # Internal backbone — core services communicate here
   aegis_net:
     driver: bridge
     ipam:
       config:
         - subnet: 172.20.0.0/16
+
+  # Sandbox isolation — sandbox_net has internet egress
+  # but ZERO routing path to aegis_net (no shared subnet,
+  # no container in both networks). Compromising Chromium
+  # inside the sandbox cannot reach Postgres or Redis.
+  sandbox_net:
+    driver: bridge
+    internal: false   # internet egress allowed for URL detonation
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24

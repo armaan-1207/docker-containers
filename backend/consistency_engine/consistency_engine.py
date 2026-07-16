@@ -1,8 +1,18 @@
 """
 consistency_engine/consistency_engine.py
 ==========================================
+Compares the browser's view of a URL against the sandbox's independent
+view to detect cloaking — the core AEGIS detection primitive.
 
-
+Bug fix:
+  compare_dom() previously hardcoded indeterminate=False. The sandbox
+  container never writes an independent sandbox.html file (its DOM data
+  lives in sandbox_metadata.json). Passing browser.html as a fallback
+  for the sandbox DOM comparison produced a trivial similarity=1.0 every
+  time (comparing the HTML file with itself). Fixed: analyze() now reads
+  sandbox_html_available from sandbox_artifacts and passes it to
+  compare_dom(), which returns indeterminate=True when False, causing
+  the DOM channel to be excluded from the weighted score entirely.
 """
 
 import difflib
@@ -87,7 +97,30 @@ class ConsistencyEngine:
             "indeterminate": indeterminate,
         }
 
-    def compare_dom(self, browser_dom: dict, sandbox_html_path: str) -> dict:
+    def compare_dom(self, browser_dom: dict, sandbox_html_path: str,
+                    sandbox_html_available: bool = True) -> dict:
+        """Compare browser DOM features against sandbox DOM features.
+
+        Args:
+            browser_dom: DOM feature dict extracted from browser.html.
+            sandbox_html_path: Path to sandbox HTML snapshot. Only used
+                when sandbox_html_available=True.
+            sandbox_html_available: Set False when the sandbox did not
+                produce an independent HTML snapshot (current architecture).
+                Returns indeterminate=True so the DOM channel is excluded
+                from the weighted consistency score.
+        """
+        if not sandbox_html_available:
+            # Sandbox never wrote sandbox.html — DOM comparison impossible.
+            # Return indeterminate so this channel drops out of weighted score.
+            logger.debug("DOM comparison skipped — sandbox_html_available=False")
+            return {
+                "similarity": 1.0,   # neutral placeholder (not used when indeterminate)
+                "sandbox_dom": {},
+                "indeterminate": True,
+                "reason": "sandbox_html_not_available",
+            }
+
         try:
             sandbox_dom = extract_features(sandbox_html_path)
         except Exception:
@@ -231,13 +264,20 @@ class ConsistencyEngine:
         sandbox_png_path = sandbox_artifacts["png_path"]
         sandbox_html_path = sandbox_artifacts["html_path"]
         sandbox_metadata = sandbox_artifacts.get("metadata", {})
+        # Bug fix: read the availability flag set by tasks/consistency.py.
+        # When False, compare_dom() returns indeterminate=True and the DOM
+        # channel is excluded from the weighted consistency score.
+        sandbox_html_available = sandbox_artifacts.get("sandbox_html_available", True)
 
         comparisons = {
             "screenshot": self.compare_screenshots(
                 browser_artifacts["png_path"], sandbox_png_path
             ),
             "ocr": self.compare_ocr(browser_ocr_text, sandbox_png_path),
-            "dom": self.compare_dom(browser_dom, sandbox_html_path),
+            "dom": self.compare_dom(
+                browser_dom, sandbox_html_path,
+                sandbox_html_available=sandbox_html_available,
+            ),
             "metadata": self.compare_metadata(browser_dom, sandbox_metadata),
             "logo": self.compare_logo(browser_vision, sandbox_png_path),
         }
