@@ -37,7 +37,8 @@ def extract_features(html_path: str, final_url: str = "") -> dict:
     for a in soup.find_all("a", href=True):
         links.append(a["href"])
 
-    form_actions = [urljoin("", f.get("action", "")) for f in forms]
+
+    form_actions = [urljoin(final_url, f.get("action", "")) for f in forms]
 
     return {
         "title": title,

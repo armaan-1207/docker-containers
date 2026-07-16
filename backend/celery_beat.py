@@ -50,23 +50,8 @@ celery.conf.update(
 # -------------------------------------------------------
 celery.conf.beat_schedule = {
 
-    # Fires the alert_pipeline for any HIGH/CRITICAL scans that somehow
-    # missed their WebSocket push (safety net sweep every 5 min).
-    "alert-sweep-every-5-min": {
-        "task": "tasks.alert_pipeline",
-        "schedule": crontab(minute="*/5"),
-        "kwargs": {"scan_id": "sweep", "risk_report": {"severity": "SWEEP"}},
-    },
-
-    # Placeholder: add a "run_consistency_sweep" task in tasks/consistency.py
-    # "consistency-sweep-every-15-min": {
-    #     "task": "tasks.consistency",
-    #     "schedule": crontab(minute="*/15"),
-    # },
-
 }
 
 if __name__ == "__main__":
     # Run via: celery -A celery_beat beat --loglevel=info
     celery.start()
-

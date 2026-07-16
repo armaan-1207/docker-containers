@@ -51,10 +51,6 @@ class Settings(BaseSettings):
     # -------------------------
     SHARED_DIR: str = "/shared/scans"
 
-    # -------------------------
-    # Sandbox Service
-    # -------------------------
-    SANDBOX_SERVICE_URL: str = "http://sandbox:9000"
     SANDBOX_TIMEOUT_SEC: int = 120
 
     # -------------------------
@@ -86,3 +82,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if not settings.DEBUG and settings.SECRET_KEY == "change-this-in-production":
+    raise RuntimeError(
+        "SECRET_KEY is still the default placeholder value while DEBUG=False. "
+        "Set a real 32+ char random SECRET_KEY in backend/.env before running "
+        "in production -- this key signs every JWT, so leaving the default "
+        "means anyone can forge valid auth tokens."
+    )
