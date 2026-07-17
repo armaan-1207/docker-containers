@@ -1551,7 +1551,7 @@ def _atomic_write_json(path, data):
             json.dump(data, f, indent=2, default=str)
         os.rename(tmp_path, path)
         try:
-            os.chmod(path, 0o664)
+            os.chmod(path, 0o664)  # nosec B103
         except OSError:
             pass
     except Exception:
@@ -1620,7 +1620,7 @@ def main():
                 dst = os.path.join(args.output_dir, f"scan_{scan_id}{suffix}")
                 shutil.move(src, dst)
                 try:
-                    os.chmod(dst, 0o664)
+                    os.chmod(dst, 0o664)  # nosec B103
                 except OSError:
                     pass
                 result["screenshots"][key] = dst

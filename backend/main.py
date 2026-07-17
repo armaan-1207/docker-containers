@@ -26,6 +26,7 @@ from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from api.routes import router
 from auth.routes import router as auth_router
@@ -75,6 +76,17 @@ if not _allowed_origins:
         "CORS_ALLOWED_ORIGINS in backend/.env before deploying."
     )
 
+_raw_hosts = getattr(settings, "ALLOWED_HOSTS", "") or ""
+_allowed_hosts: list[str] = [
+    h.strip() for h in _raw_hosts.split(",") if h.strip()
+]
+if not _allowed_hosts:
+    _allowed_hosts = ["*"]
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=_allowed_hosts,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,

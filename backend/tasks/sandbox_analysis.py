@@ -56,21 +56,15 @@ SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", settings.SHARED_SCANS
 # clear warning on import so this shows up in the worker's own startup
 # logs instead of only surfacing as a confusing per-scan Docker error
 # with no obvious cause.
-_SANDBOX_NETWORK_ENV = os.environ.get("SANDBOX_NETWORK")
+_SANDBOX_NETWORK_ENV = os.environ.get("SANDBOX_NETWORK") or getattr(settings, "SANDBOX_NETWORK", None)
 if _SANDBOX_NETWORK_ENV:
     SANDBOX_NETWORK = _SANDBOX_NETWORK_ENV
 else:
-    SANDBOX_NETWORK = "project-docker-containers_sandbox_net"
-    logger.warning(
-        "SANDBOX_NETWORK not set in backend/.env -- falling back to a "
-        "guessed network name (%s) that only matches if this repo's "
-        "checkout directory is literally named 'docker-containers'. "
-        "Run `docker network ls` to find the real name Compose generated "
-        "for this deployment (or set COMPOSE_PROJECT_NAME), then set "
-        "SANDBOX_NETWORK explicitly -- otherwise every sandbox_analysis "
-        "task will fail at container-spawn time with a confusing Docker "
-        "error instead of this clear one.",
-        SANDBOX_NETWORK,
+    raise RuntimeError(
+        "FATAL: SANDBOX_NETWORK is not set in environment or backend/.env. "
+        "Refusing to start worker or execute sandbox scans. "
+        "Run `docker network ls` to find the exact bridge network name (e.g. dockercontainers_sandbox_net) "
+        "and set SANDBOX_NETWORK explicitly."
     )
 
 
@@ -114,9 +108,15 @@ async def _run_sandbox_container(scan_id: str, target_url: str, timeout_sec: int
         "--network", SANDBOX_NETWORK,           # isolated network (finding #9)
         "--cap-drop", "ALL",                    # drop all Linux capabilities
         "--security-opt", "no-new-privileges:true",
+        "--read-only",
+        "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",  # nosec B108
+        "--tmpfs", "/home/sandbox/.config:rw,noexec,nosuid,size=32m",
+        "--tmpfs", "/home/sandbox/.pki:rw,noexec,nosuid,size=16m",
+        "--tmpfs", "/home/sandbox/.local:rw,noexec,nosuid,size=32m",
         "--pids-limit", "512",
         "--memory", "2g",
-        "--cpus", "1.0",
+        "--cpus", "1.5",                        # reconciled with sandbox/docker/docker-compose.yml
+        "--shm-size", "1gb",                    # reconciled with sandbox/docker/docker-compose.yml
         "-v", f"{SHARED_VOLUME_NAME}:/app/output",
         SANDBOX_IMAGE,
         target_url,

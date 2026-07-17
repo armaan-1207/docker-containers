@@ -178,18 +178,13 @@ def risk_fusion_task(self, scan_id: str):
 
     # Security finding #13 fix: was set() with no TTL (infinite persistence).
     # Use setex(3600) so Redis automatically evicts the entry after 1 hour.
-    # Only cache non-placeholder verdicts (random scores must not be trusted).
-    if not risk_report.get("is_placeholder", True):
-        _redis_client.setex(
-            f"risk:{scan_id}",
-            _RISK_CACHE_TTL_SECONDS,
-            json.dumps(risk_report, default=str),
-        )
-    else:
-        logger.debug(
-            "[%s] Skipping Redis cache write — is_placeholder=True (random score)",
-            scan_id,
-        )
+    # Cache all completed verdicts keyed by unique scan_id so late-joining WebSocket clients
+    # can fetch the completed result instantly without waiting on pubsub (finding #5 fix).
+    _redis_client.setex(
+        f"risk:{scan_id}",
+        _RISK_CACHE_TTL_SECONDS,
+        json.dumps(risk_report, default=str),
+    )
 
     _push_websocket_update(scan_id, risk_report)
 

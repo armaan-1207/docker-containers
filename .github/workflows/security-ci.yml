@@ -23,7 +23,7 @@ jobs:
         run: pip install bandit
 
       - name: Run Bandit Static Application Security Testing (SAST)
-        run: bandit -r backend/ sandbox/backend/ -ll -ii
+        run: bandit -r backend/ sandbox/backend/ run_scan.py scripts/ -ll -ii
 
       - name: Run Trivy Vulnerability Scanner on Filesystem
         uses: aquasecurity/trivy-action@master
@@ -34,6 +34,20 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
+
+      - name: Generate CycloneDX Software Bill of Materials (SBOM) with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'cyclonedx'
+          output: 'trivy-sbom.json'
+
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyclonedx-sbom
+          path: trivy-sbom.json
 
   sandbox-security-tests:
     name: Sandbox SSRF & Egress Proxy Tests

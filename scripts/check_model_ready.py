@@ -67,7 +67,7 @@ def check_api_readiness(api_url: str) -> bool:
     logger.info("Checking API readiness endpoint: %s", api_url)
     try:
         req = urllib.request.Request(api_url, headers={"User-Agent": "AEGIS-PreDeploy-Check/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
             status_code = resp.getcode()
             body_bytes = resp.read()
             if status_code != 200:

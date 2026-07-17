@@ -23,6 +23,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /home/sandbox/.config:rw,noexec,nosuid,size=32m
+      - /home/sandbox/.pki:rw,noexec,nosuid,size=16m
+      - /home/sandbox/.local:rw,noexec,nosuid,size=32m
     mem_limit: "2g"        # a malicious page spawning workers/timers shouldn't OOM the host
     cpus: "1.5"
     pids_limit: 512        # caps fork-bomb-style exhaustion (e.g. window.open() spam)

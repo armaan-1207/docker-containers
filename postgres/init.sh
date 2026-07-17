@@ -14,20 +14,23 @@ set -e
 
 : "${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set}"
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
-DO \$\$
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" \
+     -v aegis_pass="$AEGIS_DB_PASSWORD" <<-'EOSQL'
+DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'aegis_user') THEN
-        CREATE ROLE aegis_user LOGIN PASSWORD '${AEGIS_DB_PASSWORD}';
+        CREATE ROLE aegis_user LOGIN;
     END IF;
 END
-\$\$;
+$$;
+
+SELECT format('ALTER ROLE aegis_user WITH PASSWORD %L;', :'aegis_pass') \gexec
 
 SELECT 'CREATE DATABASE aegis_db OWNER aegis_user'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'aegis_db')\gexec
 EOSQL
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "aegis_db" <<-EOSQL
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "aegis_db" <<-'EOSQL'
 GRANT ALL PRIVILEGES ON DATABASE aegis_db TO aegis_user;
 GRANT ALL ON SCHEMA public TO aegis_user;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

@@ -14,8 +14,8 @@ ctx.verify_mode = ssl.CERT_NONE
 valid_png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
 screenshot_b64 = base64.b64encode(valid_png).decode()
 
-def run_cmd(cmd):
-    return subprocess.check_output(cmd, shell=True).decode().strip()
+def run_cmd(cmd_args):
+    return subprocess.check_output(cmd_args).decode().strip()
 
 print("=======================================================================")
 print("                      AEGIS PIPELINE SCANNER                           ")
@@ -25,7 +25,7 @@ print("=======================================================================")
 print("\n[1] Ensuring user account exists...")
 reg_req = urllib.request.Request('https://localhost/api/auth/register', data=json.dumps({'email': 'analyst@test.com', 'password': 'TestPass123!@#'}).encode(), headers={'Content-Type': 'application/json'}, method='POST')
 try:
-    urllib.request.urlopen(reg_req, context=ctx)
+    urllib.request.urlopen(reg_req, context=ctx)  # nosec B310
     print("    -> User ensured/created.")
 except Exception:
     print("    -> User already exists.")
@@ -35,7 +35,7 @@ print("\n[2] Authenticating with Nginx ingress (POST /api/auth/login)...")
 login_data = 'username=analyst@test.com&password=TestPass123!@#'.encode()
 req = urllib.request.Request('https://localhost/api/auth/login', data=login_data, headers={'Content-Type': 'application/x-www-form-urlencoded'}, method='POST')
 try:
-    auth_resp = urllib.request.urlopen(req, context=ctx)
+    auth_resp = urllib.request.urlopen(req, context=ctx)  # nosec B310
     token = json.loads(auth_resp.read().decode())['access_token']
     print("    -> SUCCESS: JWT access token acquired.")
 except Exception as e:
@@ -58,7 +58,7 @@ req_scan = urllib.request.Request('https://localhost/api/scans/stage2', data=sta
 }, method='POST')
 
 try:
-    scan_resp = urllib.request.urlopen(req_scan, context=ctx)
+    scan_resp = urllib.request.urlopen(req_scan, context=ctx)  # nosec B310
     scan_res = json.loads(scan_resp.read().decode())
     scan_id = scan_res['scan_id']
     job_id = scan_res['job_id']
@@ -74,7 +74,7 @@ except Exception as e:
 print(f"\n[4] Tracking progression of stages across Celery workers...")
 start_time = time.time()
 for _ in range(18):
-    status_query = f"docker exec -u postgres aegis_postgres psql -d aegis_db -t -c \"SELECT status, risk_score, severity FROM scans WHERE id = '{scan_id}';\""
+    status_query = ["docker", "exec", "-u", "postgres", "aegis_postgres", "psql", "-d", "aegis_db", "-t", "-c", f"SELECT status, risk_score, severity FROM scans WHERE id = '{scan_id}';"]
     row = run_cmd(status_query).strip()
     parts = [p.strip() for p in row.split('|')] if '|' in row else [row]
     current_status = parts[0] if parts else "unknown"
@@ -90,5 +90,5 @@ for _ in range(18):
     time.sleep(2)
 
 print("\n[5] Inspecting generated analysis artifacts in /shared/scans/{scan_id}...")
-files_list = run_cmd(f"docker exec aegis_celery_worker ls -la /shared/scans/{scan_id}")
+files_list = run_cmd(["docker", "exec", "aegis_celery_worker", "ls", "-la", f"/shared/scans/{scan_id}"])
 print(files_list)

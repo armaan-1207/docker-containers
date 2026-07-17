@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     #   chrome-extension://abcdef123456,https://dashboard.example.com
     # -------------------------
     CORS_ALLOWED_ORIGINS: str = ""
+    ALLOWED_HOSTS: str = "localhost,127.0.0.1,backend,nginx,*"
 
     # -------------------------
     # Database
@@ -213,6 +214,7 @@ class Settings(BaseSettings):
     # volume before the hourly file_cleanup task purges them (finding #8).
     ARTIFACT_RETENTION_DAYS: int = 14
 
+    SANDBOX_NETWORK: Optional[str] = None
     SANDBOX_IMAGE: str = "aegis-sandbox:latest"
     SHARED_SCANS_VOLUME: str = "dockercontainers_shared_scans"
     SANDBOX_TIMEOUT_SEC: int = 120
