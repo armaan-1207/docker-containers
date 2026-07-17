@@ -33,7 +33,7 @@ from auth.routes import router as auth_router
 from auth.jwt import JWTError, decode_access_token
 from config import settings
 from database.database import get_db_session
-from database.models import Scan
+from database.models import Scan, User
 from schemas.responses import HealthCheckResponse
 from websocket.websocket_manager import websocket_manager
 
@@ -166,6 +166,16 @@ async def _ws_frame_auth(websocket: WebSocket) -> Optional[str]:
     user_id = payload.get("sub")
     if not user_id:
         logger.warning("WebSocket JWT has no 'sub' claim — closing")
+        return None
+
+    try:
+        with get_db_session() as db:
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user or (hasattr(user, "is_active") and not user.is_active):
+                logger.warning("WebSocket auth failed: user %s not found or inactive", user_id)
+                return None
+    except Exception:
+        logger.exception("WebSocket auth DB lookup error")
         return None
 
     return user_id

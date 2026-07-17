@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-this-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    ALLOW_LEGACY_BCRYPT: bool = True
+    ALLOW_LEGACY_BCRYPT: bool = False
     CLAMAV_HOST: str = "clamav"
     CLAMAV_PORT: int = 3310
     CLAMAV_FAIL_CLOSED: bool = True

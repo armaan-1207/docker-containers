@@ -36,7 +36,7 @@ def verify_password_with_migration(plain_password: str, hashed_password: str) ->
         if bcrypt.checkpw(_pre_hash(plain_password), hashed_bytes):
             return True, False
         # Backward compatibility check only if explicitly enabled
-        if getattr(settings, "ALLOW_LEGACY_BCRYPT", True):
+        if getattr(settings, "ALLOW_LEGACY_BCRYPT", False):
             legacy_bytes = plain_password.encode("utf-8")[:_MAX_PASSWORD_BYTES]
             if bcrypt.checkpw(legacy_bytes, hashed_bytes):
                 return True, True

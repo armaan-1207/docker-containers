@@ -33,6 +33,9 @@ def get_current_user(
     if user is None:
         raise credentials_exception
 
+    if hasattr(user, "is_active") and not user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
+
     return user
 
 
@@ -40,5 +43,5 @@ def get_current_active_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
     if hasattr(current_user, "is_active") and not current_user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
     return current_user
