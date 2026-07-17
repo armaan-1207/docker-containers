@@ -43,6 +43,10 @@ jobs:
         run: |
           pip-audit -r backend/requirements.txt -r sandbox/docker/requirements.txt --strict --desc on
 
+      - name: Check SANDBOX_IMAGE Digest Synchronization Across Files
+        run: |
+          python scripts/check_digest_drift.py
+
   container-security:
     name: Container Build, Trivy Scanning, SBOM & Cosign
     runs-on: ubuntu-latest
@@ -121,4 +125,25 @@ jobs:
         run: |
           cosign version
           echo "[+] Cosign v2 is ready for keyless OIDC signing (or local private key) upon registry push."
+
+  model-readiness-gate:
+    name: Production Model & Pre-Deploy Readiness Gate
+    runs-on: ubuntu-latest
+    needs: [security-and-sast, container-security]
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify Model & API Gate Readiness (`check_model_ready.py`)
+        run: |
+          # In CI verification (without live online ML model or running server), verify check_model_ready script executes cleanly with --allow-placeholder
+          python scripts/check_model_ready.py --allow-placeholder
+          # Note: In production deploy pipeline, run strict gate without --allow-placeholder:
+          # python scripts/check_model_ready.py --check-api --api-url https://aegis.prod.internal/api/health
+
 

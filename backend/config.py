@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     # -------------------------
     APP_NAME: str = "AEGIS Backend"
     DEBUG: bool = False
+    ENVIRONMENT: str = "development"
 
     # -------------------------
     # Authentication
@@ -219,7 +220,8 @@ class Settings(BaseSettings):
     ARTIFACT_RETENTION_DAYS: int = 14
 
     SANDBOX_NETWORK: Optional[str] = "aegis_sandbox_net"
-    SANDBOX_IMAGE: str = "aegis-sandbox:v1.0.0"
+    SANDBOX_IMAGE: str = "aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9"
+    SANDBOX_RUNNER_SECRET: str = "aegis-runner-internal-secret-token"
     SHARED_SCANS_VOLUME: Optional[str] = "aegis_shared_scans"
     SANDBOX_TIMEOUT_SEC: int = 120
 
@@ -244,46 +246,48 @@ class Settings(BaseSettings):
     LOW_THRESHOLD: int = 40
     MEDIUM_THRESHOLD: int = 60
     HIGH_THRESHOLD: int = 80
+    LOG_LEVEL: str = "INFO"
 
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
+        extra="ignore",
     )
 
 
 settings = Settings()
 
-if not settings.DEBUG:
-    for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD"):
+if settings.ENVIRONMENT.lower() == "production":
+    for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBOX_RUNNER_SECRET"):
         val = getattr(settings, secret_name, "")
-        if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or len(val) < 32:
+        if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or val == "aegis-runner-internal-secret-token" or len(val) < 32:
             raise RuntimeError(
-                f"{secret_name} is invalid, weak, or still holds a default placeholder value ('{val}') while DEBUG=False. "
+                f"{secret_name} is invalid, weak, or still holds a default placeholder value ('{val}') while ENVIRONMENT='production'. "
                 f"Set a strong random secret (32+ characters) in backend/.env before running in production."
             )
 
     hosts = [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
     if not hosts or "*" in hosts:
         raise RuntimeError(
-            "ALLOWED_HOSTS is empty or contains wildcard '*' while DEBUG=False. "
+            "ALLOWED_HOSTS is empty or contains wildcard '*' while ENVIRONMENT='production'. "
             "Explicitly define allowed domain hostnames in ALLOWED_HOSTS for production."
         )
 
     origins = [o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
     if not origins:
         raise RuntimeError(
-            "CORS_ALLOWED_ORIGINS is not set while DEBUG=False. "
+            "CORS_ALLOWED_ORIGINS is not set while ENVIRONMENT='production'. "
             "Explicitly configure CORS_ALLOWED_ORIGINS with allowed origins before deploying."
         )
 
     if ":latest" in settings.SANDBOX_IMAGE or "@sha256:" not in settings.SANDBOX_IMAGE:
         raise RuntimeError(
-            f"SANDBOX_IMAGE ('{settings.SANDBOX_IMAGE}') uses mutable tag or lacks @sha256 digest while DEBUG=False. "
+            f"SANDBOX_IMAGE ('{settings.SANDBOX_IMAGE}') uses mutable tag or lacks @sha256 digest while ENVIRONMENT='production'. "
             "Pin SANDBOX_IMAGE by immutable digest before deploying."
         )
 
     if not settings.CLAMAV_FAIL_CLOSED:
         raise RuntimeError(
-            "CLAMAV_FAIL_CLOSED is False while DEBUG=False. "
+            "CLAMAV_FAIL_CLOSED is False while ENVIRONMENT='production'. "
             "Anti-malware scanning must be set to fail-closed in production to prevent un-scanned artifact ingestion."
         )

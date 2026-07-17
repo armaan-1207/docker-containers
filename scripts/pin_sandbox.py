@@ -45,28 +45,51 @@ def main():
 
     print(f"[pin-sandbox] Resolved digest: {digest}")
 
-    # Update .env
-    env_lines = []
-    if os.path.exists(ENV_PATH):
-        with open(ENV_PATH, "r", encoding="utf-8") as f:
-            env_lines = f.readlines()
+    # Update .env files across the project
+    target_files = [
+        os.path.join(root_dir, ".env"),
+        os.path.join(root_dir, "backend", ".env"),
+        os.path.join(root_dir, "backend", ".env.example"),
+    ]
 
-    updated = False
-    new_lines = []
-    for line in env_lines:
-        if line.strip().startswith("SANDBOX_IMAGE="):
-            new_lines.append(f"SANDBOX_IMAGE={digest}\n")
-            updated = True
-        else:
-            new_lines.append(line)
+    for target_path in target_files:
+        env_lines = []
+        if os.path.exists(target_path):
+            with open(target_path, "r", encoding="utf-8") as f:
+                env_lines = f.readlines()
 
-    if not updated:
-        new_lines.append(f"\nSANDBOX_IMAGE={digest}\n")
+        updated = False
+        new_lines = []
+        for line in env_lines:
+            if line.strip().startswith("SANDBOX_IMAGE="):
+                new_lines.append(f"SANDBOX_IMAGE={digest}\n")
+                updated = True
+            else:
+                new_lines.append(line)
 
-    with open(ENV_PATH, "w", encoding="utf-8") as f:
-        f.writelines(new_lines)
+        if not updated:
+            new_lines.append(f"\nSANDBOX_IMAGE={digest}\n")
 
-    print(f"[pin-sandbox] Successfully updated SANDBOX_IMAGE in {ENV_PATH} to {digest}")
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+
+        print(f"[pin-sandbox] Successfully updated SANDBOX_IMAGE in {target_path} to {digest}")
+
+    # Also update code fallback defaults in docker-compose.yml, config.py, and sandbox_runner_svc.py
+    code_targets = [
+        (os.path.join(root_dir, "docker-compose.yml"), r'(SANDBOX_IMAGE:\s*\$\{SANDBOX_IMAGE:-)aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64}(\})', rf'\g<1>{digest}\g<2>'),
+        (os.path.join(root_dir, "backend", "config.py"), r'(SANDBOX_IMAGE:\s*str\s*=\s*")aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64}(")', rf'\g<1>{digest}\g<2>'),
+        (os.path.join(root_dir, "backend", "services", "sandbox_runner_svc.py"), r'("SANDBOX_IMAGE",\s*")aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64}(")', rf'\g<1>{digest}\g<2>')
+    ]
+    for target_path, pattern, repl in code_targets:
+        if os.path.exists(target_path):
+            with open(target_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            new_content = re.sub(pattern, repl, content)
+            if new_content != content:
+                with open(target_path, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                print(f"[pin-sandbox] Successfully updated fallback default in {target_path} to {digest}")
 
 if __name__ == "__main__":
     main()

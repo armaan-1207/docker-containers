@@ -13,7 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from auth.jwt import create_access_token
+from auth.jwt import create_access_token, revoke_token
+from auth.dependencies import oauth2_scheme
 from auth.security import hash_password, verify_password, verify_password_with_migration
 from database.database import get_db
 from database.models import User
@@ -122,3 +123,15 @@ def login(
 
     access_token = create_access_token(data={"sub": user.id})
     return TokenResponse(access_token=access_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    token: str = Depends(oauth2_scheme),
+) -> Response:
+    """
+    Revoke the current JWT bearer token (security finding #6).
+    Adds the token's jti to the Redis blacklist with a TTL matching the token expiration.
+    """
+    revoke_token(token)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

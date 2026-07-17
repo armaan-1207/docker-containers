@@ -14,7 +14,7 @@
 #
 # Networks:
 #   aegis_net        — Internal bridge for core services (nginx/backend/db/redis/beat)
-#   docker_proxy_net — Isolated bridge, ONLY celery_worker + docker_socket_proxy.
+#   docker_proxy_net — Isolated bridge, ONLY aegis_sandbox_runner + docker_socket_proxy.
 #   sandbox_net      — Isolated bridge for sandbox only (no route to aegis_net)
 #
 # =======================================================
@@ -242,7 +242,7 @@ services:
       DOCKER_HOST: tcp://docker_socket_proxy:2375
       SANDBOX_NETWORK: aegis_sandbox_net
       SHARED_SCANS_VOLUME: aegis_shared_scans
-      SANDBOX_IMAGE: aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9}
       SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:-aegis-runner-internal-secret-token}
       MAX_CONCURRENT_DETONATIONS: "10"
     networks:
@@ -274,7 +274,6 @@ services:
     container_name: aegis_celery_worker
     networks:
       - aegis_net          # Postgres, Redis, aegis_sandbox_runner
-      - sandbox_net        # ensures dockercontainers_sandbox_net is created automatically
     entrypoint: ["/app/celery_entrypoint.sh"]
     command: >
       celery -A celery_worker worker
