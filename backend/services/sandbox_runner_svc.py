@@ -83,7 +83,16 @@ async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
             detail="Sandbox runner at maximum concurrency limit",
         )
 
-    async with sem:
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=0.001)
+    except asyncio.TimeoutError:
+        logger.warning("[admission-control] Concurrency limit (%d) reached (race resolved) — rejecting request", _MAX_CONCURRENT_DETONATIONS)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Sandbox runner at maximum concurrency limit",
+        )
+
+    try:
         scan_id = request.scan_id.strip()
         if not _UUID_RE.match(scan_id):
             logger.warning("[admission-control] Rejected invalid scan_id: %r", scan_id)
@@ -92,7 +101,7 @@ async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
                 detail="scan_id must be a canonical UUIDv4",
             )
 
-        target_url = request.target_url.strip()
+        target_url = str(request.target_url).strip()
         if not target_url.startswith(("http://", "https://")):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -160,6 +169,8 @@ async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
             returncode=proc.returncode,
             output_snippet=out_msg,
         )
+    finally:
+        sem.release()
 
 
 if __name__ == "__main__":

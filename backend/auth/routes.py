@@ -22,6 +22,8 @@ from auth.security import (
     check_account_lockout,
     record_failed_login,
     reset_failed_login,
+    check_pwned_password,
+    record_legacy_bcrypt_metric,
 )
 from database.database import get_db
 from database.models import User
@@ -58,8 +60,13 @@ def register(
     Always returns 202 Accepted with a generic message — never 409
     Conflict — so that unauthenticated callers cannot determine whether a
     given email address already exists in the system (security finding #6).
-    
     """
+    if check_pwned_password(payload.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password has appeared in public data breaches (k-anonymity HIBP check). Please choose a unique, unbreached password.",
+        )
+
     existing = db.query(User).filter(User.email == payload.email).first()
 
     # Always pay the bcrypt cost -- whether or not this email is already
@@ -134,6 +141,7 @@ def login(
 
     # Automatic hash rotation: upgrade legacy hash to SHA-256 pre-hashed format on successful login
     if needs_rehash:
+        record_legacy_bcrypt_metric()
         user.hashed_password = hash_password(form_data.password)
         db.commit()
         logger.warning(

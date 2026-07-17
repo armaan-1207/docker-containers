@@ -199,7 +199,23 @@ async def _handle_client(client_reader, client_writer, upstream_proxy, allow_pri
                 pass
         return
 
-    async with sem:
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=0.001)
+    except asyncio.TimeoutError:
+        logger.warning("Egress proxy concurrency limit (%d) reached (race resolved) — rejecting connection", _MAX_CONCURRENT_TUNNELS)
+        try:
+            client_writer.write(b"HTTP/1.1 429 Too Many Requests\r\n\r\n")
+            await client_writer.drain()
+        except Exception:
+            pass
+        finally:
+            try:
+                client_writer.close()
+            except Exception:
+                pass
+        return
+
+    try:
         try:
             request_line_bytes = await client_reader.readline()
             if not request_line_bytes:
@@ -229,6 +245,8 @@ async def _handle_client(client_reader, client_writer, upstream_proxy, allow_pri
                 client_writer.close()
             except Exception:
                 pass
+    finally:
+        sem.release()
 
 
 async def start_egress_proxy(port=DEFAULT_PORT, upstream_proxy=None, allow_private_targets=False):

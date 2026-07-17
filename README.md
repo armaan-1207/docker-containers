@@ -128,9 +128,11 @@ The **AEGIS Phishing Intelligence Platform** is a purpose-built, highly isolated
    * Redis operates with Append-Only File persistence (`--appendonly yes`, `--save 60 1`).
    * If a worker node crashes mid-detonation, `tasks.job_reconciliation` runs every 10 minutes via `celery_beat`, identifying orphaned pipeline records and transitioning stuck jobs to `failed_timeout` cleanly.
 
-6. **JWT Session Hardening & Blacklist Revocation (`jti` & Redis)**
+6. **JWT Session Hardening, Account Lockout & HIBP Breached Password Check**
    * Every bearer token embeds a unique `jti` (JWT ID) claim. On explicit logout (`POST /api/auth/logout`) or password changes, the token's `jti` is written to a Redis blacklist (`jwt_blacklist:<jti>`) with a TTL matching exactly the token's remaining time-to-live (`exp - now`), instantly revoking compromised or logged-out sessions.
-   * Constant-time timing resistance (`_DUMMY_HASH`) prevents account enumeration during login attempts while automatically upgrading legacy hashes to SHA-256 pre-hashed format.
+   * Constant-time timing resistance (`_DUMMY_HASH`) prevents account enumeration during login attempts while automatically upgrading legacy hashes to SHA-256 pre-hashed format (`metric:legacy_bcrypt_authentications` tracked in Redis).
+   * **Breached-Password Verification (k-Anonymity):** Account registration (`POST /api/auth/register`) enforces k-anonymity against Have I Been Pwned (`api.pwnedpasswords.com/range/{prefix}`), sending only the first 5 hex characters over the wire and rejecting known breached passwords without revealing account existence.
+   * **Redis-Backed Account Lockout:** Consecutive failed login attempts trigger temporary IP/email lockout (`check_account_lockout` and `record_failed_login`) after `MAX_LOGIN_ATTEMPTS`.
 
 7. **Environment Guardrails & Anti-DoS Payload Limits (`ENVIRONMENT` & Nginx)**
    * Formal separation between `DEBUG` (controls `/docs` visibility) and `ENVIRONMENT="production"`. When running in production, startup guardrails strictly enforce: 32+ character high-entropy secrets, non-wildcard `ALLOWED_HOSTS` and `CORS_ALLOWED_ORIGINS`, immutable `@sha256:` container image pinning, and `CLAMAV_FAIL_CLOSED=True`.
@@ -147,7 +149,7 @@ An end-to-end URL analysis through the 5-stage Celery pipeline typically complet
 | **Stage 1: Feature Extraction** | `browser_features.py`<br>Extracts DOM tree structure, performs `pytesseract` OCR text recognition on initial screenshots, and calculates OpenCV image perceptual hashes. | **2 – 5 sec** | ~10 sec |
 | **Stage 2: Sandbox & Malware** | `sandbox_analysis.py`<br>**Container Detonation:** RPC to `aegis_sandbox_runner` spawns ephemeral read-only `aegis-sandbox` container over `aegis_sandbox_net` to navigate the target URL, capture network HAR telemetry, and download binaries.<br>**Malware Scanning:** ClamAV sidecar (`aegis_clamav:3310`) inspects artifacts. | **6 – 15 sec** | **45 sec** (Chromium navigation timeout)<br>or **120 sec** (`SANDBOX_TIMEOUT_SEC` hard ceiling) |
 | **Stage 3: Cloaking Detection** | `consistency.py`<br>Performs structural and visual diffing between Stage 1 browser features and Stage 2 sandbox telemetry to detect **cloaking** (sites serving benign content to bots/crawlers but phishing pages to normal users). | **0.2 – 0.8 sec** | ~2 sec |
-| **Stage 4: ML Risk Ensemble** | `risk_fusion.py`<br>Aggregates multi-modal signals across OCR, DOM, URL heuristics, and cloaking scores into a unified ML risk verdict (`0–100`). Updates Postgres, caches in Redis, and emits `"Done"` via WebSocket. | **0.3 – 0.7 sec** | ~2 sec |
+| **Stage 4: ML Risk Ensemble** | `risk_fusion.py`<br>Aggregates multi-modal signals across OCR, DOM, URL heuristics, and cloaking scores into a unified ML risk verdict (`0–100`). Updates Postgres, caches in Redis, and emits `"Done"` via WebSocket.<br>*(Note: Model weights are currently placeholder (`is_placeholder=True`) pending UK ML ensemble deployment).* | **0.3 – 0.7 sec** | ~2 sec |
 | **Stage 5: Incident Alerting** | `alert_pipeline.py`<br>*(Triggered asynchronously if risk score is `HIGH` or `CRITICAL`)*. Generates formal Incident and IOC records, dispatching SIEM/Slack notifications without blocking user UI response. | **Async (~1 sec)** | Non-blocking |
 
 ### 🕒 Execution Scenarios
@@ -194,6 +196,9 @@ graph TD
     H --> I[Sigstore Cosign Keyless OIDC Image Signing]
     I --> J[Production Model Readiness Gate: check_model_ready.py]
 ```
+
+> [!NOTE]
+> **Note on Supply Chain Attestation (Cosign):** Cosign v2 installation, verification, and OIDC keyless signing permissions (`id-token: write`) are staged and validated in the CI workflow. Actual `cosign sign` execution requires a published image in a remote container registry (`REGISTRY_HOST`), which is disabled during PR and CI builds to prevent pushing unverified image tags.
 
 ### 🧰 Local Security & Automation Commands
 

@@ -6,6 +6,8 @@ auth/security.py
 import hashlib
 import hmac
 import logging
+import urllib.request
+import urllib.error
 import bcrypt
 import redis
 
@@ -113,3 +115,47 @@ def verify_password_with_migration(plain_password: str, hashed_password: str) ->
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     is_valid, _ = verify_password_with_migration(plain_password, hashed_password)
     return is_valid
+
+
+def check_pwned_password(plain_password: str) -> bool:
+    """
+    Check if the password has appeared in known public data breaches using the
+    Have I Been Pwned (HIBP) k-Anonymity API (Security finding #7).
+    Only the first 5 characters of the SHA-1 hash (`prefix`) are sent over the wire.
+    """
+    if not plain_password:
+        return False
+    sha1_hash = hashlib.sha1(plain_password.encode("utf-8")).hexdigest().upper()
+    prefix, suffix = sha1_hash[:5], sha1_hash[5:]
+    url = f"https://api.pwnedpasswords.com/range/{prefix}"
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "AEGIS-Security-HIBP-Checker"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            if resp.status != 200:
+                return False
+            for line in resp.read().decode("utf-8", errors="ignore").splitlines():
+                parts = line.strip().split(":")
+                if len(parts) == 2 and parts[0] == suffix:
+                    count = int(parts[1]) if parts[1].isdigit() else 1
+                    if count > 0:
+                        logger.warning("Registration blocked: password matched HIBP k-anonymity breach list (count=%d)", count)
+                        return True
+        return False
+    except Exception as e:
+        logger.warning("HIBP k-anonymity check failed or timed out (%s) — failing open to prevent registration outage", e)
+        return False
+
+
+def record_legacy_bcrypt_metric() -> None:
+    """
+    Increment telemetry counter for legacy bcrypt authentication events.
+    Used by operations/CI checks to safely time out ALLOW_LEGACY_BCRYPT.
+    """
+    if _redis_auth_client:
+        try:
+            _redis_auth_client.incr("metric:legacy_bcrypt_authentications")
+        except Exception as e:
+            logger.debug("Failed to record legacy bcrypt telemetry: %s", e)
