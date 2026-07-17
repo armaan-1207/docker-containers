@@ -22,7 +22,11 @@ from database.models import Scan
 logger = get_task_logger(__name__)
 
 
+from tasks import validate_scan_id
+
+
 def _scan_dir(scan_id: str) -> str:
+    validate_scan_id(scan_id)
     return os.path.join(settings.SHARED_DIR, scan_id)
 
 
@@ -46,7 +50,7 @@ def _mark_status(scan_id: str, status: str) -> None:
     acks_late=True,
 )
 def browser_features_task(self, scan_id: str):
-
+    validate_scan_id(scan_id)
     logger.info("[%s] Stage 1 (browser_features) started", scan_id)
     _mark_status(scan_id, "browser_features_running")
 

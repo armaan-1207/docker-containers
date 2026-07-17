@@ -41,6 +41,7 @@ import time
 
 from celery_worker import celery
 from config import settings
+from tasks import _UUID_RE
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +86,14 @@ def file_cleanup_task(self, retention_days: int = 14) -> dict:
     except OSError:
         logger.exception("[file_cleanup] Cannot scan %s — volume not mounted?", shared_dir)
         return {"status": "error", "detail": "Cannot scan shared_dir"}
-
     with entries:
         for entry in entries:
             if not entry.is_dir(follow_symlinks=False):
                 continue  # orphan files handled below
+
+            if not _UUID_RE.match(entry.name):
+                logger.debug("[file_cleanup] Skipping non-UUID directory: %s", entry.name)
+                continue
 
             try:
                 mtime = entry.stat(follow_symlinks=False).st_mtime

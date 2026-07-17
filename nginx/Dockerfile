@@ -20,18 +20,11 @@ RUN rm /etc/nginx/conf.d/default.conf
 # Create directory for TLS certificates
 RUN mkdir -p /etc/nginx/certs
 
-# Generate self-signed certificate for development.
-# PRODUCTION: replace this by mounting real certs from Let's Encrypt
-# or your internal CA at /etc/nginx/certs/server.crt and server.key.
-RUN openssl req -x509 -nodes -days 365 \
-    -subj "/C=US/ST=Dev/L=Dev/O=AEGIS/CN=localhost" \
-    -newkey rsa:4096 \
-    -keyout /etc/nginx/certs/server.key \
-    -out    /etc/nginx/certs/server.crt
-
-# Lock down cert permissions
-RUN chmod 600 /etc/nginx/certs/server.key \
-    && chmod 644 /etc/nginx/certs/server.crt
+# Install dynamic cert generation script into docker-entrypoint.d so nginx
+# generates a unique self-signed cert on container start (if none mounted)
+# instead of baking a private key into the built image layers.
+COPY generate-ssl.sh /docker-entrypoint.d/99-generate-ssl.sh
+RUN chmod +x /docker-entrypoint.d/99-generate-ssl.sh
 
 # Copy our hardened config
 COPY nginx.conf /etc/nginx/nginx.conf

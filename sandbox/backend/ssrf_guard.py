@@ -56,6 +56,13 @@ async def _resolve_all_ips(hostname):
     return ips
 
 
+_EXPLICIT_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("100.64.0.0/10"),   # CGNAT shared address space
+    ipaddress.ip_network("192.0.0.0/24"),    # IETF protocol assignments
+    ipaddress.ip_network("::/96"),           # IPv4-compatible IPv6 (deprecated, still routable oddly)
+]
+
+
 def _is_blocked_ip(ip_str):
     try:
         ip = ipaddress.ip_address(ip_str)
@@ -66,6 +73,9 @@ def _is_blocked_ip(ip_str):
     mapped = getattr(ip, "ipv4_mapped", None)
     if mapped is not None:
         ip = mapped
+
+    if any(ip in net for net in _EXPLICIT_BLOCKED_NETWORKS if ip.version == net.version):
+        return True
 
     return (
         ip.is_private or ip.is_loopback or ip.is_link_local or

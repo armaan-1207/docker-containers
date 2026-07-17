@@ -81,6 +81,7 @@ else:
 
 
 def _scan_dir(scan_id: str) -> str:
+    validate_scan_id(scan_id)
     return os.path.join(settings.SHARED_DIR, scan_id)
 
 
@@ -163,6 +164,7 @@ def _find_result_by_request_id(scan_id: str) -> Tuple[str, dict]:
     scans.request_id matches our scan_id. Raises FileNotFoundError if
     no match is found.
     """
+    validate_scan_id(scan_id)
     candidates = glob.glob(os.path.join(settings.SHARED_DIR, "scan_*.json"))
     for path in candidates:
         try:
@@ -237,7 +239,7 @@ def _call_sandbox(scan_id: str) -> dict:
     acks_late=True,
 )
 def sandbox_analysis_task(self, scan_id: str):
-
+    validate_scan_id(scan_id)
     logger.info("[%s] Stage 2 (sandbox_analysis) started", scan_id)
     _mark_status(scan_id, "sandbox_analysis_running")
 

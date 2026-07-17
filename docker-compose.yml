@@ -125,11 +125,13 @@ services:
     image: redis:7.2-alpine@sha256:dfa18828cbc07b3ae6a95ec7343f6c214fdee2d836197b4be8e9904420762cd8
     command: >
       redis-server
-      --save ""
-      --appendonly no
+      --save 60 1
+      --appendonly yes
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
       --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    volumes:
+      - redis_data:/data
     networks:
       - aegis_net
     expose:
@@ -308,7 +310,7 @@ services:
   # ---------------------------------------------------
   clamav:
     container_name: aegis_clamav
-    image: clamav/clamav:1.4.1
+    image: clamav/clamav:stable@sha256:83130a3b60654a4f226feffea549792cfcf28ea6b9de1dee210c8064cd114006
     environment:
       - CLAMAV_NO_FRESHCLAM=false
     volumes:
@@ -394,6 +396,9 @@ volumes:
   clamav_db:
     driver: local
     name: aegis_clamav_db
+  redis_data:
+    driver: local
+    name: aegis_redis_data
 
 # -------------------------------------------------------
 # NETWORKS

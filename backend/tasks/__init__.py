@@ -27,3 +27,18 @@ against this same list of task modules. Task modules therefore import their
 Celery app from celery_worker (`from celery_worker import celery`), not from
 a shared celery_app module anymore - celery_app.py no longer exists.
 """
+
+import re
+
+# UUID pattern for path-traversal protection across Celery tasks
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def validate_scan_id(scan_id: str) -> None:
+    """Guard against path-traversal: scan_id must be a canonical UUID."""
+    if not scan_id or not isinstance(scan_id, str) or not _UUID_RE.match(scan_id):
+        raise ValueError(f"scan_id '{scan_id}' is not a valid UUID — rejected to prevent path traversal")
+

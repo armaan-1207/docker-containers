@@ -72,6 +72,16 @@ celery.conf.beat_schedule = {
         },
         "options": {"queue": "default"},
     },
+
+    # ── Job reconciliation (finding #7 fix) ────────────────────────────────
+    # Runs every 10 minutes. Finds scans stuck in non-terminal running states
+    # due to worker crashes or broker bounces and transitions them to failed_timeout.
+    "periodic-job-reconciliation": {
+        "task": "tasks.job_reconciliation",
+        "schedule": crontab(minute="*/10"),     # every 10 minutes
+        "kwargs": {"timeout_minutes": 30},
+        "options": {"queue": "default"},
+    },
 }
 
 if __name__ == "__main__":

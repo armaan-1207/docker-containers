@@ -149,16 +149,31 @@ docker containers/
 
 ---
 
-## Security Highlights
+## Security & DevSecOps Highlights
 
 - **Least Privilege Architecture:** All services (`nginx`, `backend`, `celery_worker`, `celery_beat`, `redis`, `clamav`, `sandbox`) run with `cap_drop: ALL` and `no-new-privileges: true`.
 - **Non-Root Execution:** Application services run under the dedicated non-root `aegis` user (UID 1001).
-- **Socket Isolation:** Celery workers do not have raw access to the Docker socket; they communicate strictly through a scoped, read-only `docker_socket_proxy` (`CONTAINERS=1`, `POST=1`, `VOLUMES=0`, `EXEC=0`). For strict zero-trust multi-tenant setups, we recommend placing an admission-controlled gRPC job runner in front of the proxy.
-- **Malware Scanning:** Uploaded files and DOM snapshots are scanned via a dedicated ClamAV daemon (`clamav` sidecar) over TCP socket (`INSTREAM` protocol) with automatic signature updates. `CLAMAV_FAIL_CLOSED=True` is strictly enforced when `DEBUG=False`.
-- **Isolated Database Backups:** PostgreSQL backups (`pg_dump`) write to a dedicated `postgres_backups` volume (`aegis_postgres_backups`), isolated from primary live database files.
-- **Detonation Sandbox Isolation:** Chromium runs with `--no-sandbox` inside our non-root container (`read_only: true`, `cap_drop: ALL`, memory & PID limits). For high-security multi-tenant deployments processing hostile JavaScript, running `aegis_sandbox` inside microVM container runtimes (**gVisor** or **Kata Containers**) is recommended for kernel-level isolation.
+- **Socket Isolation:** Celery workers do not have raw access to the Docker socket; they communicate strictly through a scoped `docker_socket_proxy` (`CONTAINERS=1`, `POST=1`, `IMAGES=0`, `NETWORKS=0`, `VOLUMES=0`, `EXEC=0`). For strict zero-trust multi-tenant setups, placing an admission-controlled gRPC job runner in front of the proxy is recommended.
+- **Malware & Artifact Protection:** Uploaded files and DOM snapshots are scanned via a dedicated ClamAV sidecar (`aegis_clamav`) over TCP socket (`INSTREAM` protocol) with automatic signature updates (`freshclam`). `CLAMAV_FAIL_CLOSED=True` is strictly enforced when `DEBUG=False`.
+- **Dynamic Runtime TLS:** Nginx dynamically generates self-signed TLS certificates (`generate-ssl.sh`) at container startup on first boot, eliminating static build-time private keys baked into image layers. Production deployments can volume-mount real certificates directly over `/etc/nginx/ssl/`.
+- **SSRF & Network Protection:** Detonation requests and cloaking checks are guarded against Server-Side Request Forgery using version-independent network blocklists (explicitly covering CGNAT `100.64.0.0/10` and all IANA special-purpose ranges).
+- **Path Traversal Protection:** All Celery pipeline tasks (`browser_features`, `sandbox_analysis`, `consistency`, `risk_fusion`, `alert_pipeline`, `file_cleanup`) rigorously validate `scan_id` against strict UUID regex (`_UUID_RE`) before performing any filesystem operations.
+- **Job Reconciliation & Redis Persistence:** Redis is configured with persistence (`--appendonly yes`, `--save 60 1`) and a persistent volume (`redis_data`). Periodic job reconciliation (`tasks.job_reconciliation` every 10 mins) automatically detects jobs stuck mid-pipeline due to worker crashes or broker restarts and cleanly transitions them to `failed_timeout`.
+- **Automated Security Tooling:** Integrated `Makefile` and cross-platform `scripts/` provide immediate DevSecOps automation (`make security-scan` for `gitleaks`, `bandit`, `pip-audit`, and `trivy`; `make pin-sandbox` to automatically build and pin exact SHA256 image digests into `.env`).
 
-> **Pre-Launch Checklist (Before going live):**
-> 1. Change `SECRET_KEY` and database credentials (`AEGIS_DB_PASSWORD`, `POSTGRES_ROOT_PASSWORD`, `REDIS_PASSWORD`) in `.env` to strong, unique secrets (`secrets.token_hex(32)`).
-> 2. Replace the baked-in self-signed Nginx certificate by volume-mounting real production TLS certificates (`/etc/nginx/ssl/aegis.crt` and `aegis.key`) so private keys are never shared across built images.
-> 3. Pin `SANDBOX_IMAGE` (`aegis-sandbox:v1.0.0@sha256:...`) and configure external threat intelligence API keys (`VIRUSTOTAL_API_KEY`, etc.).
+---
+
+## DevSecOps & Commands Reference
+
+```powershell
+# DevSecOps Automation (Makefile or Python scripts)
+make pin-sandbox                      # Build & pin immutable SANDBOX_IMAGE sha256 digest into .env
+make security-scan                    # Run local SAST/dependency/secrets scan (gitleaks, bandit, pip-audit, trivy)
+make run-scan                         # Run E2E integration verification scan (run_scan.py)
+
+# PowerShell Helper
+.\aegis.ps1 up                        # Start core services
+.\aegis.ps1 down                      # Stop services
+.\aegis.ps1 logs                      # Follow all logs
+.\aegis.ps1 status                    # Show health + ports
+```

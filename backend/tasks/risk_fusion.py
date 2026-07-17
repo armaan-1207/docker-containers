@@ -41,7 +41,11 @@ _RISK_CACHE_TTL_SECONDS = 3600
 ALERT_SEVERITIES = {"HIGH", "CRITICAL"}
 
 
+from tasks import validate_scan_id
+
+
 def _scan_dir(scan_id: str) -> str:
+    validate_scan_id(scan_id)
     return os.path.join(settings.SHARED_DIR, scan_id)
 
 
@@ -66,6 +70,7 @@ def _load_json(path: str) -> dict:
 
 
 def _get_scan_fields(scan_id: str) -> dict:
+    validate_scan_id(scan_id)
     with get_db_session() as db:
         scan = db.query(Scan).filter(Scan.id == scan_id).first()
         if scan is None:
@@ -135,7 +140,7 @@ def _push_websocket_update(scan_id: str, payload: dict) -> None:
     acks_late=True,
 )
 def risk_fusion_task(self, scan_id: str):
-
+    validate_scan_id(scan_id)
     logger.info("[%s] Stage 4 (risk_fusion) started", scan_id)
     _mark_status(scan_id, "risk_fusion_running")
 

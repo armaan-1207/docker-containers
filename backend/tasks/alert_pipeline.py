@@ -110,6 +110,9 @@ def _send_slack_notification(scan_id: str, risk_report: dict) -> None:
         logger.exception("[%s] Slack notification failed (non-fatal)", scan_id)
 
 
+from tasks import validate_scan_id
+
+
 @celery.task(
     bind=True,
     name="tasks.alert_pipeline",
@@ -119,7 +122,7 @@ def _send_slack_notification(scan_id: str, risk_report: dict) -> None:
     acks_late=True,
 )
 def alert_pipeline_task(self, scan_id: str, risk_report: dict):
-
+    validate_scan_id(scan_id)
     logger.info(
         "[%s] Stage 5 (alert_pipeline) started - severity=%s",
         scan_id,

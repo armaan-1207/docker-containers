@@ -35,7 +35,11 @@ from consistency_engine.consistency_engine import ConsistencyEngine
 logger = logging.getLogger(__name__)
 
 
+from tasks import validate_scan_id
+
+
 def _scan_dir(scan_id: str) -> str:
+    validate_scan_id(scan_id)
     return os.path.join(settings.SHARED_DIR, scan_id)
 
 
@@ -64,7 +68,7 @@ def _load_json(path: str) -> dict:
     acks_late=True,
 )
 def consistency_task(self, scan_id: str):
-
+    validate_scan_id(scan_id)
     logger.info("[%s] Stage 3 (consistency) started", scan_id)
     _mark_status(scan_id, "consistency_running")
 

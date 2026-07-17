@@ -33,6 +33,7 @@ celery = Celery(
         "tasks.risk_fusion",
         "tasks.alert_pipeline",
         "tasks.file_cleanup",     # periodic artifact retention (finding #8 fix)
+        "tasks.job_reconciliation", # periodic stuck job reconciliation (finding #7 fix)
     ],
 )
 
@@ -56,6 +57,7 @@ celery.conf.update(
         "tasks.risk_fusion": {"queue": "default"},
         "tasks.alert_pipeline": {"queue": "alerts"},
         "tasks.file_cleanup": {"queue": "default"},
+        "tasks.job_reconciliation": {"queue": "default"},
     },
 )
 
