@@ -6,7 +6,7 @@
 # per job, or `docker exec` against a running instance — see
 # ../DOCKER_ARCHITECTURE_IDEATION.md for the two options) and reads the
 # output back off a shared Docker volume.
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
 
 # System deps: only what headless Chromium itself needs to run, plus
 # libzbar0 for QR detection (pyzbar). No Xvfb, no x11vnc, no supervisor

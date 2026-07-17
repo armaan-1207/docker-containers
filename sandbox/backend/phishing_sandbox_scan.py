@@ -855,7 +855,12 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
             # whatever orchestrator ends up running this.
             browser = await p.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-quic",
+                    "--disable-features=QUIC,HttpsFirstBalancedModeAutoEnable",
+                ],
             )
         context_kwargs = {
             "viewport": {"width": viewport[0], "height": viewport[1]},

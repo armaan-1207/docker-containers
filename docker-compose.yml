@@ -24,9 +24,6 @@
 # SHARED CONFIGURATION ANCHORS
 # -------------------------------------------------------
 x-backend-common: &backend-common
-  build:
-    context: ./backend
-    dockerfile: Dockerfile
   env_file:
     - ./backend/.env
   environment:
@@ -83,6 +80,9 @@ services:
   # ---------------------------------------------------
   backend:
     <<: *backend-common
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: aegis_backend
     command: >
       uvicorn main:app
@@ -112,7 +112,7 @@ services:
   # ---------------------------------------------------
   redis:
     container_name: aegis_redis
-    image: redis:7.2-alpine
+    image: redis:7.2-alpine@sha256:dfa18828cbc07b3ae6a95ec7343f6c214fdee2d836197b4be8e9904420762cd8
     command: >
       redis-server
       --save ""
@@ -137,7 +137,7 @@ services:
   # ---------------------------------------------------
   postgres:
     container_name: aegis_postgres
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:?POSTGRES_ROOT_PASSWORD must be set in .env}
@@ -183,9 +183,9 @@ services:
       CONFIGS: 0
       DISTRIBUTION: 0
       EXEC: 0
-      IMAGES: 1
+      IMAGES: 0
       INFO: 0
-      NETWORKS: 1
+      NETWORKS: 0
       NODES: 0
       PLUGINS: 0
       SECRETS: 0
@@ -211,6 +211,9 @@ services:
   # ---------------------------------------------------
   celery_worker:
     <<: *backend-common
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
     container_name: aegis_celery_worker
     networks:
       - aegis_net          # Postgres, Redis
@@ -252,6 +255,9 @@ services:
   # ---------------------------------------------------
   celery_beat:
     <<: [*backend-common,  *default-resources]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
     container_name: aegis_celery_beat
     entrypoint: ["/app/celery_entrypoint.sh"]
     command: >

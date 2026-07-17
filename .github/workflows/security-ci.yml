@@ -1,0 +1,57 @@
+name: DevSecOps Pipeline CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  static-security-scans:
+    name: Bandit & Trivy Scans
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Run Bandit Static Application Security Testing (SAST)
+        run: bandit -r backend/ sandbox/backend/ -ll -ii
+
+      - name: Run Trivy Vulnerability Scanner on Filesystem
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+  sandbox-security-tests:
+    name: Sandbox SSRF & Egress Proxy Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Test & Sandbox Dependencies
+        run: |
+          pip install -r sandbox/tests/requirements-test.txt
+          pip install -r sandbox/docker/requirements.txt
+
+      - name: Run Sandbox Security Test Suite (SSRF Guard & Egress Proxy IP-Pinning)
+        run: |
+          pytest sandbox/tests/ -v

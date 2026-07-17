@@ -5,7 +5,7 @@
 # ===================================================
 
 # --- Build stage: install Python deps ---
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93 AS builder
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
 # --- Runtime stage: minimal, non-root ---
-FROM python:3.11-slim AS runtime
+FROM python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93 AS runtime
 
 # Security: non-root user
 RUN groupadd --gid 1001 aegis \
@@ -29,13 +29,14 @@ RUN groupadd --gid 1001 aegis \
 
 WORKDIR /app
 
-# Runtime system deps only (psycopg2-binary, tesseract for OCR)
+# Runtime system deps only — docker-cli removed, this image never
+# talks to docker_socket_proxy (only celery_worker does — see
+# backend/Dockerfile.worker)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     tesseract-ocr \
     libzbar0 \
     curl \
-    docker-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder

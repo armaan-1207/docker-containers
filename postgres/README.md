@@ -21,16 +21,16 @@ Primary relational datastore for the AEGIS platform.
 
 ## Connection string
 ```
-postgresql+psycopg2://aegis_user:aegis_pass@postgres:5432/aegis_db
+postgresql+psycopg2://aegis_user:<SET_IN_ENV_AEGIS_DB_PASSWORD>@postgres:5432/aegis_db
 ```
 
 ## Credentials
 | Role | Username | Password | Access |
 |------|----------|----------|--------|
-| Superuser | `postgres` | `postgres_root_pass` | Full admin |
-| App user | `aegis_user` | `aegis_pass` | `aegis_db` only |
+| Superuser | `postgres` | `<SET_IN_ENV_POSTGRES_ROOT_PASSWORD>` | Full admin |
+| App user | `aegis_user` | `<SET_IN_ENV_AEGIS_DB_PASSWORD>` | `aegis_db` only |
 
-> **Change passwords** in `backend/.env` and `docker-compose.yml` before production.
+> **IMPORTANT:** Credentials must be supplied via `.env` files (`POSTGRES_ROOT_PASSWORD` and `AEGIS_DB_PASSWORD`). Never commit literal credentials to version control.
 
 ## Files
 | File | Purpose |
