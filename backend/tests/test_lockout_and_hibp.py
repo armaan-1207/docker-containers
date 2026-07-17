@@ -14,6 +14,7 @@ from auth.security import (
     reset_failed_login,
     check_pwned_password,
     record_legacy_bcrypt_metric,
+    record_hibp_failure_metric,
     verify_password_with_migration,
 )
 from api.routes import _sanitize_html_content
@@ -37,6 +38,7 @@ def test_account_lockout_threshold():
 def test_record_and_reset_failed_login():
     mock_redis = MagicMock()
     mock_redis.get.return_value = "2"
+    mock_redis.incr.return_value = 1
     with patch.object(security_module, "_redis_auth_client", mock_redis):
         with patch.object(security_module.settings, "LOCKOUT_DURATION_SECONDS", 900):
             record_failed_login("test@example.com")
@@ -51,6 +53,7 @@ def test_check_pwned_password_k_anonymity_match():
     # Mocking urlopen to return HIBP suffix lines including our match
     mock_response = MagicMock()
     mock_response.status = 200
+    mock_response.__enter__.return_value = mock_response
     # Suppose sha1 of "password123" has suffix "A1C3E..."
     # We mock the return line to match whatever suffix hashlib computes for "testpwned"
     import hashlib
@@ -66,6 +69,7 @@ def test_check_pwned_password_k_anonymity_match():
 def test_check_pwned_password_clean():
     mock_response = MagicMock()
     mock_response.status = 200
+    mock_response.__enter__.return_value = mock_response
     mock_response.read.return_value = b"00000000000000000000000000000000000:10\n"
 
     with patch("urllib.request.urlopen", return_value=mock_response):
@@ -84,10 +88,17 @@ def test_record_legacy_bcrypt_metric():
         mock_redis.incr.assert_called_once_with("metric:legacy_bcrypt_authentications")
 
 
+def test_record_hibp_failure_metric():
+    mock_redis = MagicMock()
+    with patch.object(security_module, "_redis_auth_client", mock_redis):
+        record_hibp_failure_metric()
+        mock_redis.incr.assert_called_once_with("metric:hibp_api_failures")
+
+
 def test_xss_html_sanitization_strips_scripts_and_event_handlers():
     malicious_html = (
         '<html><head><title>Phish</title><script>alert("XSS")</script></head>'
-        'body onload="stealCookies()">'
+        '<body onload="stealCookies()">'
         '<a href="javascript:alert(1)">Click Me</a>'
         '<iframe src="https://evil.com"></iframe>'
         '<form action="https://evil.com/post"><input type="text" name="user"></form>'

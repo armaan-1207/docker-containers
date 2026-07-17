@@ -226,7 +226,8 @@ async def ws_user(websocket: WebSocket, user_id: str):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    await websocket_manager.connect_user(user_id, websocket)
+    if not await websocket_manager.connect_user(user_id, websocket):
+        return
     try:
         while True:
             await websocket.receive_text()

@@ -41,7 +41,7 @@ SANDBOX_IMAGE = os.environ.get(
 )
 SANDBOX_NETWORK = os.environ.get("SANDBOX_NETWORK", "aegis_sandbox_net")
 SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", "aegis_shared_scans")
-SANDBOX_RUNNER_SECRET = os.environ.get("SANDBOX_RUNNER_SECRET", "aegis-runner-internal-secret-token")
+SANDBOX_RUNNER_SECRET = os.environ.get("SANDBOX_RUNNER_SECRET", "")
 _MAX_CONCURRENT_DETONATIONS = int(os.environ.get("MAX_CONCURRENT_DETONATIONS", "10"))
 _detonate_sem = None
 

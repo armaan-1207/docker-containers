@@ -146,7 +146,20 @@ def check_pwned_password(plain_password: str) -> bool:
         return False
     except Exception as e:
         logger.warning("HIBP k-anonymity check failed or timed out (%s) — failing open to prevent registration outage", e)
+        record_hibp_failure_metric()
         return False
+
+
+def record_hibp_failure_metric() -> None:
+    """
+    Increment telemetry counter when HIBP API reachability fails.
+    Allows operations to alert on prolonged external API outages while failing open.
+    """
+    if _redis_auth_client:
+        try:
+            _redis_auth_client.incr("metric:hibp_api_failures")
+        except Exception as e:
+            logger.debug("Failed to record HIBP failure telemetry: %s", e)
 
 
 def record_legacy_bcrypt_metric() -> None:

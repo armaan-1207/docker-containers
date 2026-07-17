@@ -71,6 +71,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - REQUIRE_REAL_CERT=${REQUIRE_REAL_CERT:-false}
     networks:
       - aegis_net
     depends_on:
@@ -257,7 +259,7 @@ services:
       SANDBOX_NETWORK: aegis_sandbox_net
       SHARED_SCANS_VOLUME: aegis_shared_scans
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9}
-      SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:-aegis-runner-internal-secret-token}
+      SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:?SANDBOX_RUNNER_SECRET must be set in .env}
       MAX_CONCURRENT_DETONATIONS: "10"
     networks:
       - aegis_net          # celery_worker communicates here via RPC
@@ -297,7 +299,7 @@ services:
       --hostname=worker@%h
     environment:
       SANDBOX_RUNNER_URL: http://aegis_sandbox_runner:8002/detonate
-      SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:-aegis-runner-internal-secret-token}
+      SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:?SANDBOX_RUNNER_SECRET must be set in .env}
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
       SANDBOX_NETWORK: aegis_sandbox_net

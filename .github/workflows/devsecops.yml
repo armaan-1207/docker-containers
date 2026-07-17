@@ -73,6 +73,14 @@ jobs:
         run: |
           docker build -f sandbox/docker/Dockerfile -t aegis-sandbox:ci .
 
+      - name: Build Runner Image locally for vulnerability scan
+        run: |
+          docker build -f backend/Dockerfile.runner -t aegis-runner:ci ./backend
+
+      - name: Pull Nginx Image locally for vulnerability scan
+        run: |
+          docker pull nginx:1.27-alpine
+
       - name: Run Trivy Scanner (Non-blocking Full Audit including unfixed CVEs)
         uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
         with:
@@ -112,10 +120,34 @@ jobs:
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
 
-      - name: Generate CycloneDX SBOM for Backend Image
+      - name: Run Trivy Scanner on Runner Image (Blocking for Fixed CVEs)
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        with:
+          image-ref: 'aegis-runner:ci'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Run Trivy Scanner on Nginx Image (Blocking for Fixed CVEs)
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        with:
+          image-ref: 'nginx:1.27-alpine'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Generate CycloneDX SBOMs for Backend, Runner, and Nginx
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
             image --format cyclonedx --output /tmp/sbom-backend.json aegis-backend:ci
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
+            image --format cyclonedx --output /tmp/sbom-runner.json aegis-runner:ci
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
+            image --format cyclonedx --output /tmp/sbom-nginx.json nginx:1.27-alpine
 
       - name: Upload CycloneDX SBOM Artifacts
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
@@ -124,10 +156,30 @@ jobs:
           path: /tmp/sbom-*.json
           retention-days: 14
 
-      - name: Verify Cosign Installation & Display Keyless OIDC Signing Notice
+      - name: Exercise Supply-Chain Signing & Verification End-to-End in CI
+        env:
+          COSIGN_PASSWORD: "ephemeral-ci-test-password"
         run: |
           cosign version
-          echo "[+] Cosign v2 is ready for keyless OIDC signing (or local private key) upon registry push."
+          docker run -d -p 5001:5000 --name local-registry registry:2
+          
+          docker tag aegis-sandbox:ci localhost:5001/aegis-sandbox:ci
+          docker tag aegis-backend:ci localhost:5001/aegis-backend:ci
+          docker tag aegis-runner:ci localhost:5001/aegis-runner:ci
+          
+          docker push localhost:5001/aegis-sandbox:ci
+          docker push localhost:5001/aegis-backend:ci
+          docker push localhost:5001/aegis-runner:ci
+          
+          cosign generate-key-pair --output-key-prefix /tmp/aegis-ci
+          cosign sign --yes --key /tmp/aegis-ci.key localhost:5001/aegis-sandbox:ci
+          cosign sign --yes --key /tmp/aegis-ci.key localhost:5001/aegis-backend:ci
+          cosign sign --yes --key /tmp/aegis-ci.key localhost:5001/aegis-runner:ci
+          
+          cosign verify --key /tmp/aegis-ci.pub localhost:5001/aegis-sandbox:ci
+          cosign verify --key /tmp/aegis-ci.pub localhost:5001/aegis-backend:ci
+          cosign verify --key /tmp/aegis-ci.pub localhost:5001/aegis-runner:ci
+          echo "[+] End-to-End supply-chain signing and signature verification succeeded!"
 
   model-readiness-gate:
     name: Production Model & Pre-Deploy Readiness Gate

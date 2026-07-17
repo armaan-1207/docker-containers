@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", settings.SANDBOX_IMAGE)
 SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", settings.SHARED_SCANS_VOLUME)
 SANDBOX_RUNNER_URL = os.environ.get("SANDBOX_RUNNER_URL", "http://aegis_sandbox_runner:8002/detonate")
-SANDBOX_RUNNER_SECRET = os.environ.get("SANDBOX_RUNNER_SECRET", "aegis-runner-internal-secret-token")
+SANDBOX_RUNNER_SECRET = os.environ.get("SANDBOX_RUNNER_SECRET", settings.SANDBOX_RUNNER_SECRET)
 
 # Network to attach the sandbox container to (must be isolated from aegis_net).
 #

@@ -71,7 +71,7 @@ def main():
 
     # 4. Trivy Container Image Scan
     if shutil.which("trivy"):
-        for img in ["aegis-backend:ci", "aegis-sandbox:v1.0.0"]:
+        for img in ["aegis-backend:ci", "aegis-sandbox:v1.0.0", "aegis-runner:ci", "nginx:1.27-alpine"]:
             success &= check_and_run(
                 "trivy",
                 ["image", "--severity", "HIGH,CRITICAL", img],

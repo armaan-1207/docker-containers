@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Dict, Optional, Set
 
-from fastapi import WebSocket
+from fastapi import WebSocket, status
 from redis import asyncio as aioredis
 
 from config import settings
@@ -69,15 +69,21 @@ class WebSocketManager:
             task.cancel()
         logger.info("[%s] browser disconnected", scan_id)
 
-    async def connect_user(self, user_id: str, websocket: WebSocket) -> None:
+    async def connect_user(self, user_id: str, websocket: WebSocket) -> bool:
         # NOTE: websocket.accept() is called by main.py BEFORE frame-based auth.
         # Do NOT call accept() here again.
-        self.user_connections.setdefault(user_id, set()).add(websocket)
+        user_socks = self.user_connections.setdefault(user_id, set())
+        if len(user_socks) >= settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER:
+            logger.warning("[%s] user exceeded max websocket connections (%d), rejecting connection", user_id, settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER)
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Too many concurrent websocket connections")
+            return False
+        user_socks.add(websocket)
         logger.info("[%s] dashboard user connected", user_id)
         key = f"user:{user_id}:{id(websocket)}"
         self._listen_tasks[key] = asyncio.create_task(
             self._forward_channel(_user_channel(user_id), websocket, one_shot=False, timeout_sec=3600)
         )
+        return True
 
     def disconnect_user(self, user_id: str, websocket: WebSocket) -> None:
         connections = self.user_connections.get(user_id)

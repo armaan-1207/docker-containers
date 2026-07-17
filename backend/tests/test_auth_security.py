@@ -12,15 +12,18 @@ import auth.jwt as jwt_module
 
 
 def test_access_token_has_unique_jti():
-    token1 = create_access_token({"sub": "user_1"})
-    token2 = create_access_token({"sub": "user_1"})
-    
-    payload1 = decode_access_token(token1)
-    payload2 = decode_access_token(token2)
-    
-    assert "jti" in payload1
-    assert "jti" in payload2
-    assert payload1["jti"] != payload2["jti"]
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = None
+    with patch.object(jwt_module, "_redis_client", mock_redis):
+        token1 = create_access_token({"sub": "user_1"})
+        token2 = create_access_token({"sub": "user_1"})
+        
+        payload1 = decode_access_token(token1)
+        payload2 = decode_access_token(token2)
+        
+        assert "jti" in payload1
+        assert "jti" in payload2
+        assert payload1["jti"] != payload2["jti"]
 
 
 def test_decode_revoked_token_raises_jwt_error():

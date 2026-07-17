@@ -56,6 +56,7 @@ class UserRegisterRequest(BaseModel):
           - At least one lowercase letter
           - At least one digit
           - At least one special character from the allowed set
+          - Pattern & entropy checks (zxcvbn + character diversity check)
         """
         errors = []
         if not any(c.isupper() for c in v):
@@ -70,6 +71,23 @@ class UserRegisterRequest(BaseModel):
             raise ValueError(
                 "Password must contain: " + ", ".join(errors)
             )
+
+        # High Finding #5: Entropy & pattern resistance (preventing e.g. Aaaaaaaaaa1!)
+        if len(set(v)) < 5:
+            raise ValueError("Password entropy too low: must contain at least 5 unique characters")
+        if any(v.count(c) > len(v) * 0.5 for c in set(v)):
+            raise ValueError("Password entropy too low: contains excessively repetitive characters")
+
+        try:
+            import zxcvbn
+            result = zxcvbn.zxcvbn(v)
+            if result.get("score", 0) < 3:
+                raise ValueError(
+                    f"Password is too easy to guess (entropy score {result.get('score', 0)}/4). Avoid dictionary words or common patterns."
+                )
+        except ImportError:
+            pass
+
         return v
 
     model_config = ConfigDict(

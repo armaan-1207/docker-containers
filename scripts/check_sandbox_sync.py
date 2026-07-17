@@ -80,7 +80,27 @@ def main():
             print(f"  - {repr(s)}", file=sys.stderr)
         sys.exit(1)
 
-    print("[check-sandbox-sync] SUCCESS: sandbox_runner_svc.py and docker-compose.yml sandbox definitions are fully synchronized.")
+    # Critical Finding #2: Assert strict network isolation on docker_proxy_net
+    import yaml
+    compose_data = yaml.safe_load(compose_content)
+    proxy_net_services = []
+    for svc_name, svc_conf in compose_data.get("services", {}).items():
+        nets = svc_conf.get("networks", [])
+        if isinstance(nets, dict):
+            net_list = list(nets.keys())
+        elif isinstance(nets, list):
+            net_list = nets
+        else:
+            net_list = []
+        if "docker_proxy_net" in net_list:
+            proxy_net_services.append(svc_name)
+
+    allowed_proxy_services = {"docker_socket_proxy", "aegis_sandbox_runner"}
+    if set(proxy_net_services) != allowed_proxy_services:
+        print(f"[check-sandbox-sync] ERROR: Unauthorized service(s) attached to docker_proxy_net! Found: {sorted(proxy_net_services)}, Allowed exactly: {sorted(allowed_proxy_services)}", file=sys.stderr)
+        sys.exit(1)
+
+    print("[check-sandbox-sync] SUCCESS: sandbox_runner_svc.py and docker-compose.yml definitions (including docker_proxy_net isolation) are fully synchronized.")
 
 if __name__ == "__main__":
     main()
