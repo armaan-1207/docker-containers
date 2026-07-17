@@ -13,14 +13,20 @@ import argparse
 parser = argparse.ArgumentParser(description="AEGIS E2E Integration Test Runner")
 parser.add_argument("--host", default=os.environ.get("AEGIS_HOST", "https://localhost"), help="Target API host")
 parser.add_argument("--email", default=os.environ.get("TEST_EMAIL", "analyst@test.com"), help="Test account email")
-parser.add_argument("--password", default=os.environ.get("TEST_PASSWORD"), help="Test account password (required if TEST_PASSWORD env var not set)")
+parser.add_argument("--password", help="Test account password (will prompt if omitted)")
 parser.add_argument("--ca-bundle", default=os.environ.get("SSL_CERT_FILE"), help="Path to CA bundle for TLS verification")
 parser.add_argument("--insecure", action="store_true", default=False, help="Disable TLS certificate verification (only auto-enabled for localhost/127.0.0.1 targets)")
+parser.add_argument("--url", default="https://example.com/", help="Target URL to scan")
 args = parser.parse_known_args()[0]
 
-if not args.password:
-    print("FATAL: --password argument or TEST_PASSWORD environment variable is required.", file=sys.stderr)
-    sys.exit(1)
+password = args.password or os.environ.get("TEST_PASSWORD")
+if not password:
+    import getpass
+    password = getpass.getpass("Enter test account password: ")
+    if not password:
+        print("FATAL: Password is required.", file=sys.stderr)
+        sys.exit(1)
+args.password = password
 
 ctx = ssl.create_default_context()
 if args.ca_bundle and os.path.exists(args.ca_bundle):
@@ -64,9 +70,9 @@ except Exception as e:
     sys.exit(1)
 
 # 3. Submit Stage 2 Scan
-target_url = "https://example.com/"
+target_url = args.url
 print(f"\n[3] Submitting Stage 2 scan payload for: {target_url}...")
-html_payload = "<html><head><title>Example Domain</title></head><body><h1>Scan Test</h1></body></html>"
+html_payload = f"<html><head><title>Scan Target</title></head><body><h1>Scan Test for {target_url}</h1></body></html>"
 stage2_payload = json.dumps({
     'url': target_url,
     'screenshot_base64': screenshot_b64,

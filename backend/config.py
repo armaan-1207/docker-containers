@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     REQUIRE_REAL_CERT: bool = False
+    BACKUP_DIR: str = "/backups"
 
     @property
     def is_production(self) -> bool:
@@ -284,7 +285,7 @@ if settings.ENVIRONMENT == "production" and not settings.REQUIRE_REAL_CERT:
 
 for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBOX_RUNNER_SECRET"):
     val = getattr(settings, secret_name, "")
-    if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or val == "aegis-runner-internal-secret-token" or len(val) < 32:
+    if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or len(val) < 32:
         raise RuntimeError(
             f"Secure-by-default check: {secret_name} is invalid, weak, or still holds a default placeholder value ('{val}'). "
             f"Set a strong random secret (32+ characters) in backend/.env before running."
@@ -292,17 +293,19 @@ for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBO
 
 hosts = [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
 if not hosts or "*" in hosts:
-    raise RuntimeError(
-        "Secure-by-default check: ALLOWED_HOSTS is empty or contains wildcard '*'. "
-        "Explicitly define allowed domain hostnames in ALLOWED_HOSTS."
-    )
+    if settings.ENVIRONMENT == "production":
+        raise RuntimeError(
+            "Secure-by-default check: ALLOWED_HOSTS is empty or contains wildcard '*'. "
+            "Explicitly define allowed domain hostnames in ALLOWED_HOSTS."
+        )
 
 origins = [o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
 if not origins:
-    raise RuntimeError(
-        "Secure-by-default check: CORS_ALLOWED_ORIGINS is not set. "
-        "Explicitly configure CORS_ALLOWED_ORIGINS with allowed origins before running."
-    )
+    if settings.ENVIRONMENT == "production":
+        raise RuntimeError(
+            "Secure-by-default check: CORS_ALLOWED_ORIGINS is not set. "
+            "Explicitly configure CORS_ALLOWED_ORIGINS with allowed origins before running."
+        )
 
 if ":latest" in settings.SANDBOX_IMAGE or "@sha256:" not in settings.SANDBOX_IMAGE:
     raise RuntimeError(

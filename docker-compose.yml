@@ -212,7 +212,8 @@ services:
       CONTAINERS: 1
       POST: 1
       # AUTH: 0 — relies on strict network isolation (docker_proxy_net being internal: true with only aegis_sandbox_runner attached).
-      # Accepted risk: unauthenticated POST /containers/create is restricted solely to the isolated aegis_sandbox_runner container.
+      # WARNING: Treat any future addition to docker_proxy_net as a critical security review item.
+      # Exposing this proxy to unauthenticated services allows full host takeover.
       AUTH: 0
       BUILD: 0
       COMMIT: 0
@@ -289,6 +290,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile.worker
     container_name: aegis_celery_worker
+    volumes:
+      - shared_scans:/shared/scans
+      - db_backups:/backups
     networks:
       - aegis_net          # Postgres, Redis, aegis_sandbox_runner
     entrypoint: ["/app/celery_entrypoint.sh"]
@@ -446,6 +450,9 @@ volumes:
   postgres_backups:
     driver: local
     name: aegis_postgres_backups
+  db_backups:
+    driver: local
+    name: aegis_db_backups
   celery_beat_data:
     driver: local
     name: aegis_celery_beat_data

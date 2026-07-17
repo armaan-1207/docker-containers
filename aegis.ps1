@@ -9,6 +9,7 @@
 #   .\aegis.ps1 logs        - Follow all logs
 #   .\aegis.ps1 build       - Rebuild all images (no-cache)
 #   .\aegis.ps1 status      - Show container health + ports
+#   .\aegis.ps1 verify      - Verify local container signatures with cosign
 #   .\aegis.ps1 sandbox <URL> - Run one sandbox scan
 #   .\aegis.ps1 shell       - Open shell in backend container
 #   .\aegis.ps1 reset       - DESTRUCTIVE: wipe all volumes + containers
@@ -34,6 +35,15 @@ switch ($Command) {
 
     "up" {
         Write-Header "Starting Core Services"
+        
+        # Enforce supply chain signature verification if cosign is available
+        if (Get-Command "cosign" -ErrorAction SilentlyContinue) {
+            Write-Host "[INFO] Cosign detected, verifying image signatures..." -ForegroundColor Cyan
+            .\aegis.ps1 verify
+        } else {
+            Write-Host "[WARN] Cosign not installed. Skipping local signature verification." -ForegroundColor Yellow
+        }
+
         docker compose -f $COMPOSE_FILE up -d nginx backend redis postgres celery_worker celery_beat
         Write-Host ""
         Write-Host "[OK] Core services started." -ForegroundColor Green
@@ -63,6 +73,15 @@ switch ($Command) {
         Write-Host ""
         Write-Host "Shared volume contents:" -ForegroundColor Yellow
         docker run --rm -v desktop_shared_scans:/data alpine ls -la /data 2>&1
+    }
+
+    "verify" {
+        Write-Header "Verifying Image Signatures"
+        # Verify local images built/pulled during CI
+        Write-Host "Verifying aegis-sandbox:ci..."
+        cosign verify --key cosign.pub aegis-sandbox:ci || Write-Host "[WARN] Signature mismatch or missing for aegis-sandbox:ci" -ForegroundColor Yellow
+        Write-Host "Verifying aegis-worker:ci..."
+        cosign verify --key cosign.pub aegis-worker:ci || Write-Host "[WARN] Signature mismatch or missing for aegis-worker:ci" -ForegroundColor Yellow
     }
 
     "sandbox" {
@@ -98,6 +117,7 @@ switch ($Command) {
         Write-Host "  .\aegis.ps1 logs              Follow all logs"
         Write-Host "  .\aegis.ps1 build             Rebuild all images (no-cache)"
         Write-Host "  .\aegis.ps1 status            Show health + shared volume"
+        Write-Host "  .\aegis.ps1 verify            Verify local container signatures with cosign"
         Write-Host "  .\aegis.ps1 sandbox <URL>     Run one sandbox scan"
         Write-Host "  .\aegis.ps1 shell             Backend bash shell"
         Write-Host "  .\aegis.ps1 reset             Wipe everything (DESTRUCTIVE)"

@@ -9,7 +9,8 @@ Addresses DevSecOps Review Finding #6:
   previously required manual execution via cron or Task Scheduler on the host.
   This task runs inside the `celery_worker` (which now includes `postgresql-client`)
   and executes daily logical backups directly against `postgres:5432`, storing compressed
-  dumps in `/shared/scans/db_backups/` and automatically pruning dumps older than 7 days.
+  dumps in the dedicated `/backups` volume and automatically pruning dumps older than 7 days.
+  Avoids exposing credentials by using a temporary `.pgpass` file.
 """
 
 import glob
@@ -40,7 +41,7 @@ def db_backup_task(self, retention_days: int = 7) -> dict:
     """
     logger.info("[db_backup] Starting automated logical database backup (retention=%d days)", retention_days)
 
-    backup_dir = os.path.join(settings.SHARED_DIR, "db_backups")
+    backup_dir = settings.BACKUP_DIR
     os.makedirs(backup_dir, exist_ok=True)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -52,9 +53,17 @@ def db_backup_task(self, retention_days: int = 7) -> dict:
         logger.error("[db_backup] AEGIS_DB_PASSWORD not set — cannot authenticate to postgres")
         raise RuntimeError("AEGIS_DB_PASSWORD is empty")
 
-    env = os.environ.copy()
-    env["PGPASSWORD"] = db_password
+    pgpass_path = os.path.join(os.path.expanduser("~"), ".pgpass")
+    try:
+        with open(pgpass_path, "w", encoding="utf-8") as f:
+            f.write(f"postgres:5432:aegis_db:aegis_user:{db_password}\n")
+        os.chmod(pgpass_path, 0o600)
+    except IOError as e:
+        logger.error("[db_backup] Failed to write .pgpass: %s", e)
+        raise RuntimeError("Could not secure .pgpass file")
 
+    env = os.environ.copy()
+    
     # Use pg_dump custom format (-F c) for compressed, restorable archives
     cmd = [
         "pg_dump",
@@ -90,6 +99,12 @@ def db_backup_task(self, retention_days: int = 7) -> dict:
     except Exception as exc:
         logger.exception("[db_backup] Unexpected error executing pg_dump")
         raise self.retry(exc=exc)
+    finally:
+        if os.path.exists(pgpass_path):
+            try:
+                os.remove(pgpass_path)
+            except OSError:
+                pass
 
     # Prune expired backups
     cutoff_time = time.time() - (retention_days * 86400)

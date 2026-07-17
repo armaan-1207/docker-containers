@@ -22,7 +22,9 @@ Security hardening applied:
 import asyncio
 import json
 import logging
+import sys
 from typing import Optional
+import structlog
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,7 +39,46 @@ from database.models import Scan, User
 from schemas.responses import HealthCheckResponse
 from websocket.websocket_manager import websocket_manager
 
-logger = logging.getLogger(__name__)
+if settings.is_production:
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer()
+        ],
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
+    )
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=logging.INFO,
+    )
+    logger = structlog.get_logger(__name__)
+else:
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.dev.ConsoleRenderer()
+        ],
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
+    )
+    logging.basicConfig(level=logging.DEBUG if settings.DEBUG else logging.INFO)
+    logger = structlog.get_logger(__name__)
 
 # ─── Application ────────────────────────────────────────────────────────────
 # Swagger/ReDoc disabled when is_production=True or DEBUG=False.

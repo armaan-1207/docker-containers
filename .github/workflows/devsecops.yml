@@ -39,6 +39,9 @@ jobs:
 
       - name: Run Bandit Python SAST
         run: |
+          echo "Running full-severity non-blocking pass for visibility..."
+          bandit -r backend/ sandbox/backend/ || true
+          echo "Running blocking pass (Medium/High severity and confidence only)..."
           bandit -r backend/ sandbox/backend/ -ll -ii
 
       - name: Run Dependency Vulnerability Audit (pip-audit)
