@@ -38,6 +38,10 @@ x-backend-common: &backend-common
       condition: service_healthy
     redis:
       condition: service_healthy
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
   restart: unless-stopped
 
 # Resource limit anchor reused by all long-running services
@@ -72,6 +76,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     restart: unless-stopped
     <<: *default-resources
 
@@ -129,6 +139,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     <<: *default-resources
 
@@ -145,6 +159,7 @@ services:
       AEGIS_DB_PASSWORD: ${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - postgres_backups:/var/backups/postgresql
       - ./postgres/init.sh:/docker-entrypoint-initdb.d/01_init.sh:ro
     networks:
       - aegis_net
@@ -156,6 +171,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     deploy:
       resources:
@@ -199,6 +216,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - docker_proxy_net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
     restart: unless-stopped
     deploy:
       resources:
@@ -294,6 +316,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /home/sandbox/.config:rw,noexec,nosuid,size=32m
+      - /home/sandbox/.pki:rw,noexec,nosuid,size=16m
+      - /home/sandbox/.local:rw,noexec,nosuid,size=32m
     shm_size: "1gb"
     deploy:
       resources:
@@ -314,6 +342,8 @@ volumes:
   shared_scans:
     driver: local
   postgres_data:
+    driver: local
+  postgres_backups:
     driver: local
   celery_beat_data:
     driver: local

@@ -38,17 +38,18 @@ postgresql+psycopg2://aegis_user:<SET_IN_ENV_AEGIS_DB_PASSWORD>@postgres:5432/ae
 | `init.sql` | Creates `aegis_user`, `aegis_db`, grants, extensions. Runs once on first boot. |
 
 ## Volumes
-- `postgres_data:/var/lib/postgresql/data` — persistent, survives container restarts
+- `postgres_data:/var/lib/postgresql/data` — persistent live database files
+- `postgres_backups:/var/backups/postgresql` — isolated volume dedicated to database dumps (protects backups from live volume corruption)
 
 ## Backup & Retention Strategy
-To ensure disaster recovery (DR) preparedness without overflowing host disk space:
+To ensure disaster recovery (DR) preparedness without overflowing host disk space or risking backup loss if primary data corrupts:
 
 ### 1. Automated Daily Backups (`pg_dump`)
-Run daily logical backups using cron or Windows Task Scheduler executing inside the container:
+Run daily logical backups using cron or Windows Task Scheduler executing inside the container against the dedicated `/var/backups/postgresql/` mount:
 ```powershell
-docker exec aegis_postgres pg_dump -U aegis_user -F c -b -v -f /var/lib/postgresql/data/aegis_db_$(date +%Y%m%d_%H%M%S).dump aegis_db
+docker exec aegis_postgres pg_dump -U aegis_user -F c -b -v -f /var/backups/postgresql/aegis_db_$(date +%Y%m%d_%H%M%S).dump aegis_db
 ```
-For production deployments requiring minimal RPO (Recovery Point Objective), enable Write-Ahead Log (WAL) archiving (`archive_mode = on` / `pg_waldump`) with `pg_basebackup` for Point-In-Time Recovery (PITR).
+For production deployments requiring minimal RPO (Recovery Point Objective), enable Write-Ahead Log (WAL) archiving (`archive_mode = on` / `pg_waldump`) with `pg_basebackup` for Point-In-Time Recovery (PITR). Note: Regularly verify restores (`pg_restore -C -d postgres ...`) on staging to validate integrity.
 
 ### 2. Retention Policy
 - **Daily Backups:** Retain for **7 days** locally or in encrypted cloud object storage (AWS S3 / GCP Cloud Storage with lifecycle policies).

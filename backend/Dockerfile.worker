@@ -20,7 +20,7 @@ WORKDIR /app
 # docker-cli lives ONLY in this image — the worker is the one service
 # that ever needs to reach docker_socket_proxy to spawn sandbox containers.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 tesseract-ocr libzbar0 curl docker-cli \
+    libpq5 tesseract-ocr libzbar0 curl docker-cli clamav \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /usr/local

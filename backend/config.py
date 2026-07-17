@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     ALLOW_LEGACY_BCRYPT: bool = True
+    CLAMAV_FAIL_CLOSED: bool = False
 
     # -------------------------
     # CORS (finding #16)

@@ -14,7 +14,7 @@ parser.add_argument("--host", default=os.environ.get("AEGIS_HOST", "https://loca
 parser.add_argument("--email", default=os.environ.get("TEST_EMAIL", "analyst@test.com"), help="Test account email")
 parser.add_argument("--password", default=os.environ.get("TEST_PASSWORD", "TestPass123!@#"), help="Test account password")
 parser.add_argument("--ca-bundle", default=os.environ.get("SSL_CERT_FILE"), help="Path to CA bundle for TLS verification")
-parser.add_argument("--insecure", action="store_true", default=True, help="Disable TLS certificate verification (default True for dev/self-signed)")
+parser.add_argument("--insecure", action="store_true", default=False, help="Disable TLS certificate verification (only auto-enabled for localhost/127.0.0.1 targets)")
 args = parser.parse_known_args()[0]
 
 ctx = ssl.create_default_context()
