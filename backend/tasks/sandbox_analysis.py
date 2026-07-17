@@ -162,7 +162,18 @@ def _find_result_by_request_id(scan_id: str) -> Tuple[str, dict]:
     no match is found.
     """
     validate_scan_id(scan_id)
-    candidates = glob.glob(os.path.join(settings.SHARED_DIR, "scan_*.json"))
+    # Check exact per-scan path first, then fall back to glob checking both root and subdirectories
+    exact_path = os.path.join(settings.SHARED_DIR, scan_id, f"scan_{scan_id}.json")
+    if os.path.exists(exact_path):
+        try:
+            with open(exact_path) as f:
+                data = json.load(f)
+            if data.get("scans", {}).get("request_id") == scan_id:
+                return exact_path, data
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    candidates = glob.glob(os.path.join(settings.SHARED_DIR, "scan_*.json")) + glob.glob(os.path.join(settings.SHARED_DIR, "*", "scan_*.json"))
     for path in candidates:
         try:
             with open(path) as f:
@@ -221,9 +232,13 @@ def _call_sandbox(scan_id: str) -> dict:
         qpath = drow.get("quarantined_path")
         if qpath:
             if not os.path.exists(qpath):
-                worker_qpath = os.path.join(settings.SHARED_DIR, "quarantine", os.path.basename(qpath))
-                if os.path.exists(worker_qpath):
-                    qpath = worker_qpath
+                for qcand in (
+                    os.path.join(settings.SHARED_DIR, scan_id, "quarantine", os.path.basename(qpath)),
+                    os.path.join(settings.SHARED_DIR, "quarantine", os.path.basename(qpath)),
+                ):
+                    if os.path.exists(qcand):
+                        qpath = qcand
+                        break
             if os.path.exists(qpath):
                 clean_dl, dl_details = scan_file_clamav(qpath)
                 drow["malware_scan"] = {"is_clean": clean_dl, "details": dl_details}

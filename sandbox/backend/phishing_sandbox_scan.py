@@ -1182,9 +1182,10 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
                         size = tmp_path.stat().st_size
                         if size <= MAX_DOWNLOAD_BYTES:
                             os.makedirs(DOWNLOAD_QUARANTINE_DIR, exist_ok=True)
+                            safe_name = os.path.basename(getattr(d, "suggested_filename", "") or "download")[:128]
                             quarantined_path = os.path.join(
                                 DOWNLOAD_QUARANTINE_DIR,
-                                f"{scan_id}_{uuid.uuid4().hex[:8]}_{d.suggested_filename}",
+                                f"{scan_id}_{uuid.uuid4().hex[:8]}_{safe_name}",
                             )
                             shutil.move(str(tmp_path), quarantined_path)
                         else:
@@ -1195,10 +1196,11 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
                 except Exception as e:
                     logger.warning("Download handling failed for %s: %s",
                                     getattr(d, "suggested_filename", "?"), e, exc_info=True)
+                safe_name = os.path.basename(getattr(d, "suggested_filename", "") or "download")[:128]
                 downloads_rows.append({
                     "downloaded_id": str(uuid.uuid4()),
                     "scan_id": scan_id,
-                    "file_name": d.suggested_filename,
+                    "file_name": safe_name,
                     "file_size": size,
                     # Ops/debug field, not part of the DOWNLOADS table schema —
                     # drop this key before inserting if your DB column set is strict.

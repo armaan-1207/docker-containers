@@ -40,13 +40,13 @@ from websocket.websocket_manager import websocket_manager
 logger = logging.getLogger(__name__)
 
 # ─── Application ────────────────────────────────────────────────────────────
-# Swagger/ReDoc disabled in production (DEBUG=False).
+# Swagger/ReDoc disabled when is_production=True or DEBUG=False.
 app = FastAPI(
     title=settings.APP_NAME,
-    debug=settings.DEBUG,
-    docs_url="/docs"        if settings.DEBUG else None,
-    redoc_url="/redoc"      if settings.DEBUG else None,
-    openapi_url="/openapi.json" if settings.DEBUG else None,
+    debug=settings.DEBUG and not settings.is_production,
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
 )
 
 # ─── CORS — Security finding #16 fix ────────────────────────────────────────
@@ -63,9 +63,9 @@ _allowed_origins: list[str] = [
     o.strip() for o in _raw_origins.split(",") if o.strip()
 ]
 if not _allowed_origins:
-    if not settings.DEBUG:
+    if settings.is_production:
         raise RuntimeError(
-            "CORS_ALLOWED_ORIGINS must be explicitly set when DEBUG=False. "
+            "CORS_ALLOWED_ORIGINS must be explicitly set when running in production. "
             "Configure CORS_ALLOWED_ORIGINS with allowed origins before deploying."
         )
     # Safe default for dev: allow localhost only
@@ -86,9 +86,9 @@ _allowed_hosts: list[str] = [
     h.strip() for h in _raw_hosts.split(",") if h.strip()
 ]
 if not _allowed_hosts or "*" in _allowed_hosts:
-    if not settings.DEBUG:
+    if settings.is_production:
         raise RuntimeError(
-            "ALLOWED_HOSTS is empty or contains wildcard '*' while DEBUG=False. "
+            "ALLOWED_HOSTS is empty or contains wildcard '*' while running in production. "
             "Explicitly define allowed domain hostnames in ALLOWED_HOSTS for production."
         )
     if not _allowed_hosts:

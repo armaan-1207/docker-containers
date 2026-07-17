@@ -1,21 +1,60 @@
+import os
+import json
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from database.models import User
+from database.models import User, Scan
 from auth.dependencies import get_current_user
 
 from schemas.quick_scan import QuickScanRequest, QuickScanResponse
 from schemas.stage2 import Stage2Request, Stage2Response
 
 from services.quickscan import run_quickscan
-from services.stage2_analysis import run_stage2_analysis
+from services.stage2_analysis import run_stage2_analysis, _validate_scan_id, _scan_dir
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
+
+# Whitelist of allowed scan artifacts to prevent path traversal / sensitive data leakage
+_ALLOWED_ARTIFACTS = {
+    "browser.html",
+    "browser.png",
+    "sandbox.png",
+    "risk_report.json",
+    "browser_features.json",
+    "consistency_report.json",
+    "sandbox_metadata.json",
+}
+
+
+def _sanitize_html_content(html: str) -> str:
+    """
+    Sanitize captured raw phishing HTML for safe viewing inside an analyst iframe/dashboard.
+    Strips active script execution elements, event handler attributes, and dangerous URI schemes.
+    """
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup.find_all(["script", "iframe", "object", "embed", "applet", "base", "link"]):
+            tag.decompose()
+        for tag in soup.find_all(True):
+            for attr in list(tag.attrs.keys()):
+                if attr.lower().startswith("on"):
+                    del tag.attrs[attr]
+                elif attr.lower() in ("href", "src", "action", "formaction"):
+                    val = str(tag.attrs[attr]).strip().lower()
+                    if val.startswith("javascript:") or val.startswith("vbscript:") or val.startswith("data:text/html"):
+                        del tag.attrs[attr]
+        return str(soup)
+    except Exception as e:
+        logger.warning("BS4 HTML sanitization error: %s, returning stripped text", e)
+        return html.replace("<", "&lt;").replace(">", "&gt;")
 
 
 @router.post("/quick", response_model=QuickScanResponse)
@@ -75,3 +114,90 @@ async def stage2_scan(
         )
 
     return result
+
+
+@router.get("/{scan_id}")
+async def get_scan(
+    scan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieve metadata and risk report (if completed) for a specific scan.
+    """
+    try:
+        _validate_scan_id(scan_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if not scan or scan.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan not found.")
+
+    report = None
+    report_path = os.path.join(_scan_dir(scan_id), "risk_report.json")
+    if os.path.exists(report_path):
+        try:
+            with open(report_path, "r", encoding="utf-8") as f:
+                report = json.load(f)
+        except Exception:
+            pass
+
+    return {
+        "scan_id": scan.id,
+        "url": scan.url,
+        "status": scan.status,
+        "risk_score": scan.risk_score,
+        "severity": scan.severity,
+        "created_at": scan.created_at,
+        "updated_at": scan.updated_at,
+        "risk_report": report,
+    }
+
+
+@router.get("/{scan_id}/artifacts/{artifact_name}")
+async def get_scan_artifact(
+    scan_id: str,
+    artifact_name: str,
+    sanitized: bool = Query(True, description="Whether to sanitize HTML artifacts against XSS before serving"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieve a specific scan artifact (screenshot, DOM snapshot, or JSON report).
+
+    Hardening analyst UI against XSS (security finding):
+    When serving captured HTML (`browser.html`), strict Content-Security-Policy
+    `sandbox` headers are enforced so the browser renders the DOM purely as inert
+    visual HTML without script execution, network access, or cookie/origin access.
+    Additionally, `sanitized=true` (default) strips script tags and event handlers.
+    """
+    try:
+        _validate_scan_id(scan_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    if artifact_name not in _ALLOWED_ARTIFACTS:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requested artifact is not permitted.")
+
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if not scan or scan.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan not found.")
+
+    file_path = os.path.join(_scan_dir(scan_id), artifact_name)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact file not found.")
+
+    if artifact_name == "browser.html":
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            raw_html = f.read()
+        content = _sanitize_html_content(raw_html) if sanitized else raw_html
+        headers = {
+            "Content-Security-Policy": "sandbox; default-src 'none'; img-src data: blob: 'self'; style-src 'unsafe-inline' 'self';",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "SAMEORIGIN",
+            "Content-Disposition": 'inline; filename="captured_phishing_page.html"',
+        }
+        return Response(content=content, media_type="text/html", headers=headers)
+
+    return FileResponse(file_path, filename=artifact_name)

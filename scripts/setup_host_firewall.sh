@@ -21,46 +21,49 @@
 
 set -euo pipefail
 
-SANDBOX_SUBNET="${1:-}"
-
-if [[ -z "${SANDBOX_SUBNET}" ]]; then
-    echo "[-] Error: SANDBOX_SUBNET not specified."
-    echo "Usage: sudo $0 <sandbox-subnet-cidr>"
-    echo "Example: sudo $0 172.28.0.0/16"
+if [[ $# -eq 0 ]]; then
+    echo "[-] Error: No subnet CIDRs specified."
+    echo "Usage: sudo $0 <sandbox-subnet-cidr> [aegis-net-subnet-cidr ...]"
+    echo "Example: sudo $0 172.28.0.0/16 172.29.0.0/16"
     echo ""
-    echo "To inspect the current subnet for aegis_sandbox_net:"
-    echo "  docker network inspect aegis_sandbox_net -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}'"
+    echo "To inspect the current subnets for both aegis_sandbox_net and aegis_net:"
+    echo "  docker network inspect aegis_sandbox_net aegis_net -f '{{.Name}}: {{range .IPAM.Config}}{{.Subnet}}{{end}}'"
     exit 1
 fi
 
-echo "[+] Configuring DOCKER-USER iptables chain for sandbox subnet: ${SANDBOX_SUBNET}"
-
 # Ensure DOCKER-USER chain exists (created by Docker Daemon)
 iptables -N DOCKER-USER 2>/dev/null || true
-
-# 1. Allow established and related connections back to the sandbox
 iptables -I DOCKER-USER -i docker0 -o docker0 -j RETURN 2>/dev/null || true
-iptables -I DOCKER-USER -s "${SANDBOX_SUBNET}" -m state --state ESTABLISHED,RELATED -j RETURN
 
-# 2. Block Cloud Metadata endpoints (169.254.169.254 / fe80::/10)
-echo "[+] Adding rules to block cloud metadata service (AWS/GCP/Azure)..."
-iptables -A DOCKER-USER -s "${SANDBOX_SUBNET}" -d 169.254.169.254/32 -j DROP
-iptables -A DOCKER-USER -s "${SANDBOX_SUBNET}" -d 169.254.0.0/16 -j DROP
+for SUBNET in "$@"; do
+    echo "[+] Configuring DOCKER-USER iptables chain for subnet: ${SUBNET}"
 
-# 3. Block loopback and host gateway interfaces
-echo "[+] Adding rules to block host loopback and internal gateways..."
-iptables -A DOCKER-USER -s "${SANDBOX_SUBNET}" -d 127.0.0.0/8 -j DROP
-iptables -A DOCKER-USER -s "${SANDBOX_SUBNET}" -d 0.0.0.0/8 -j DROP
+    # 1. Allow established and related connections back to the subnet
+    iptables -I DOCKER-USER -s "${SUBNET}" -m state --state ESTABLISHED,RELATED -j RETURN
 
-# 4. Block RFC 1918 Private Address Spaces (Internal networks / databases / redis / worker / CGNAT)
-echo "[+] Adding rules to block RFC 1918 & RFC 6598 (CGNAT) internal IP ranges..."
-iptables -A DOCKER-USER -s "${SANDBOX_SUBNET}" -d 10.0.0.0/8 -j DROP
-iptables -A DOCKER-USER -s "${SANDBOX_SUBNET}" -d 172.16.0.0/12 -j DROP
-iptables -A DOCKER-USER -s "${SANDBOX_SUBNET}" -d 192.168.0.0/16 -j DROP
-iptables -A DOCKER-USER -s "${SANDBOX_SUBNET}" -d 100.64.0.0/10 -j DROP  # RFC 6598 Carrier-Grade NAT
+    # 2. Allow intra-subnet traffic between containers on the same network bridge
+    #    (Required for aegis_net so backend/celery_worker can communicate with postgres/redis/clamav)
+    iptables -A DOCKER-USER -s "${SUBNET}" -d "${SUBNET}" -j RETURN
 
-# 5. Allow all other outbound traffic to public Internet (for live phishing detonation)
-# (Any packets not dropped by the above rules fall through to Docker's standard NAT rules)
-echo "[+] Host-layer firewall configuration applied successfully to DOCKER-USER."
-echo "[+] Active rules for ${SANDBOX_SUBNET}:"
-iptables -L DOCKER-USER -n -v | grep "${SANDBOX_SUBNET}" || true
+    # 3. Block Cloud Metadata endpoints (169.254.169.254 / fe80::/10)
+    echo "[+] Adding rules to block cloud metadata service (AWS/GCP/Azure) for ${SUBNET}..."
+    iptables -A DOCKER-USER -s "${SUBNET}" -d 169.254.169.254/32 -j DROP
+    iptables -A DOCKER-USER -s "${SUBNET}" -d 169.254.0.0/16 -j DROP
+
+    # 4. Block loopback and host gateway interfaces
+    echo "[+] Adding rules to block host loopback and internal gateways for ${SUBNET}..."
+    iptables -A DOCKER-USER -s "${SUBNET}" -d 127.0.0.0/8 -j DROP
+    iptables -A DOCKER-USER -s "${SUBNET}" -d 0.0.0.0/8 -j DROP
+
+    # 5. Block RFC 1918 Private Address Spaces (Internal networks / databases / redis / worker / CGNAT)
+    echo "[+] Adding rules to block RFC 1918 & RFC 6598 (CGNAT) internal IP ranges for ${SUBNET}..."
+    iptables -A DOCKER-USER -s "${SUBNET}" -d 10.0.0.0/8 -j DROP
+    iptables -A DOCKER-USER -s "${SUBNET}" -d 172.16.0.0/12 -j DROP
+    iptables -A DOCKER-USER -s "${SUBNET}" -d 192.168.0.0/16 -j DROP
+    iptables -A DOCKER-USER -s "${SUBNET}" -d 100.64.0.0/10 -j DROP  # RFC 6598 Carrier-Grade NAT
+
+    echo "[+] Active rules for ${SUBNET}:"
+    iptables -L DOCKER-USER -n -v | grep "${SUBNET}" || true
+done
+
+echo "[+] Host-layer firewall configuration applied successfully to DOCKER-USER across all specified subnets."

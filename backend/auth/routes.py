@@ -15,7 +15,14 @@ from sqlalchemy.orm import Session
 
 from auth.jwt import create_access_token, revoke_token
 from auth.dependencies import oauth2_scheme
-from auth.security import hash_password, verify_password, verify_password_with_migration
+from auth.security import (
+    hash_password,
+    verify_password,
+    verify_password_with_migration,
+    check_account_lockout,
+    record_failed_login,
+    reset_failed_login,
+)
 from database.database import get_db
 from database.models import User
 from schemas.auth import TokenResponse, UserRegisterRequest, UserRegisterAcceptedResponse
@@ -91,6 +98,20 @@ def login(
     found we compare against _DUMMY_HASH, ensuring the bcrypt work-factor
     is always paid and response time does not leak whether the email exists.
     """
+    email = (form_data.username or "").lower().strip()
+    try:
+        if check_account_lockout(email):
+            logger.warning("Login blocked for locked account: %s", email)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Account temporarily locked due to excessive failed login attempts. Please try again later.",
+            )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable",
+        )
+
     user = db.query(User).filter(User.email == form_data.username).first()
 
     # Always run the password hash comparison — even when user is None —
@@ -106,7 +127,10 @@ def login(
     )
 
     if user is None or not password_valid:
+        record_failed_login(email)
         raise invalid_credentials
+
+    reset_failed_login(email)
 
     # Automatic hash rotation: upgrade legacy hash to SHA-256 pre-hashed format on successful login
     if needs_rehash:

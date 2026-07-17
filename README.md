@@ -128,6 +128,14 @@ The **AEGIS Phishing Intelligence Platform** is a purpose-built, highly isolated
    * Redis operates with Append-Only File persistence (`--appendonly yes`, `--save 60 1`).
    * If a worker node crashes mid-detonation, `tasks.job_reconciliation` runs every 10 minutes via `celery_beat`, identifying orphaned pipeline records and transitioning stuck jobs to `failed_timeout` cleanly.
 
+6. **JWT Session Hardening & Blacklist Revocation (`jti` & Redis)**
+   * Every bearer token embeds a unique `jti` (JWT ID) claim. On explicit logout (`POST /api/auth/logout`) or password changes, the token's `jti` is written to a Redis blacklist (`jwt_blacklist:<jti>`) with a TTL matching exactly the token's remaining time-to-live (`exp - now`), instantly revoking compromised or logged-out sessions.
+   * Constant-time timing resistance (`_DUMMY_HASH`) prevents account enumeration during login attempts while automatically upgrading legacy hashes to SHA-256 pre-hashed format.
+
+7. **Environment Guardrails & Anti-DoS Payload Limits (`ENVIRONMENT` & Nginx)**
+   * Formal separation between `DEBUG` (controls `/docs` visibility) and `ENVIRONMENT="production"`. When running in production, startup guardrails strictly enforce: 32+ character high-entropy secrets, non-wildcard `ALLOWED_HOSTS` and `CORS_ALLOWED_ORIGINS`, immutable `@sha256:` container image pinning, and `CLAMAV_FAIL_CLOSED=True`.
+   * Nginx applies location-specific payload limits (`client_max_body_size`): `1M` default for general API/JSON requests to prevent memory exhaustion, `256k` for auth endpoints (`/api/auth/*`), and `50M` strictly reserved for scan submission endpoints (`/api/scans/*`) handling high-resolution screenshot uploads.
+
 ---
 
 ## ⚡ Pipeline Scan Duration & Timing Breakdown
@@ -178,11 +186,13 @@ AEGIS incorporates automated continuous security enforcement via GitHub Actions 
 graph TD
     A[Push / Pull Request / Weekly Cron] --> B[Gitleaks Secret Scanner]
     B --> C[Bandit Python SAST -ll -ii]
-    C --> D[pip-audit --strict --desc on]
-    D --> E[Trivy Container Scanner: Non-Blocking Full Audit]
-    E --> F[Trivy Container Scanner: Blocking Gate for Fixed CVEs]
-    F --> G[Generate CycloneDX SBOM Artifacts]
-    G --> H[Sigstore Cosign Keyless OIDC Image Signing]
+    C --> D[pip-audit Vulnerability Scan]
+    D --> E[Zero-Drift Digest Sync Check: check_digest_drift.py]
+    E --> F[Trivy Container Scanner: Non-Blocking Full Audit]
+    F --> G[Trivy Container Scanner: Blocking Gate for Fixed CVEs]
+    G --> H[Generate CycloneDX SBOM Artifacts]
+    H --> I[Sigstore Cosign Keyless OIDC Image Signing]
+    I --> J[Production Model Readiness Gate: check_model_ready.py]
 ```
 
 ### 🧰 Local Security & Automation Commands

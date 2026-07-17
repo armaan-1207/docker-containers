@@ -27,6 +27,10 @@ def main():
             os.path.join(root_dir, "docker-compose.yml"),
             r'SANDBOX_IMAGE:\s*\$\{SANDBOX_IMAGE:-(aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64})\}'
         ),
+        "docker-compose.yml (sandbox)": (
+            os.path.join(root_dir, "docker-compose.yml"),
+            r'image:\s*\$\{SANDBOX_IMAGE:-(aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64})\}'
+        ),
         "backend/config.py": (
             os.path.join(root_dir, "backend", "config.py"),
             r'SANDBOX_IMAGE:\s*str\s*=\s*"(aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64})"'

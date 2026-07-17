@@ -56,6 +56,9 @@ def decode_access_token(token: str) -> dict:
             if _redis_client.get(f"jwt_blacklist:{jti}"):
                 raise JWTError("Token has been revoked")
         except redis.exceptions.RedisError as e:
+            if getattr(settings, "JWT_REVOCATION_FAIL_CLOSED", True) or settings.is_production:
+                logger.error("Redis error during JWT blacklist check (fail-closed): %s", e)
+                raise JWTError("Authentication store unavailable")
             logger.warning("Redis error during JWT blacklist check: %s", e)
     return payload
 
@@ -82,6 +85,8 @@ def revoke_token(token: str) -> bool:
         return True
     except Exception as e:
         logger.error("Failed to revoke token: %s", e)
+        if (getattr(settings, "JWT_REVOCATION_FAIL_CLOSED", True) or settings.is_production) and isinstance(e, redis.exceptions.RedisError):
+            raise
         return False
 
 

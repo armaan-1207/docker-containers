@@ -35,7 +35,7 @@ Key security notes:
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Literal
 from urllib.parse import urlparse, urlunparse
 
 from pydantic import field_validator
@@ -56,7 +56,18 @@ class Settings(BaseSettings):
     # -------------------------
     APP_NAME: str = "AEGIS Backend"
     DEBUG: bool = False
-    ENVIRONMENT: str = "development"
+    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+
+    @property
+    def is_production(self) -> bool:
+        env = (self.ENVIRONMENT or "").lower().strip()
+        return env not in ("development", "dev", "test", "testing", "local")
+
+    def __repr__(self) -> str:
+        return f"<Settings APP_NAME={self.APP_NAME!r} ENVIRONMENT={self.ENVIRONMENT!r} [CREDENTIALS AND URLS SCRUBBED]>"
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     # -------------------------
     # Authentication
@@ -68,6 +79,10 @@ class Settings(BaseSettings):
     CLAMAV_HOST: str = "clamav"
     CLAMAV_PORT: int = 3310
     CLAMAV_FAIL_CLOSED: bool = True
+    JWT_REVOCATION_FAIL_CLOSED: bool = True
+    MAX_LOGIN_ATTEMPTS: int = 5
+    LOCKOUT_DURATION_SECONDS: int = 900  # 15 minutes
+    AUTH_LOCKOUT_FAIL_CLOSED: bool = True
 
     # -------------------------
     # CORS (finding #16)
@@ -257,7 +272,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-if settings.ENVIRONMENT.lower() == "production":
+if settings.is_production:
     for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBOX_RUNNER_SECRET"):
         val = getattr(settings, secret_name, "")
         if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or val == "aegis-runner-internal-secret-token" or len(val) < 32:

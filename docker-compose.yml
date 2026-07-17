@@ -175,6 +175,14 @@ services:
       start_period: 10s
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
     restart: unless-stopped
     deploy:
       resources:
@@ -379,7 +387,7 @@ services:
     build:
       context: ./sandbox
       dockerfile: docker/Dockerfile
-    image: ${SANDBOX_IMAGE:-aegis-sandbox:v1.0.0}
+    image: ${SANDBOX_IMAGE:-aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9}
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
@@ -400,7 +408,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "1.5"
           memory: 2048M
           pids: 512
         reservations:

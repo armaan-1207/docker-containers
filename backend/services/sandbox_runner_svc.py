@@ -18,6 +18,7 @@ Security Hardening (DevSecOps Critical Finding #1):
 """
 
 import asyncio
+import hmac
 import logging
 import os
 import re
@@ -54,7 +55,7 @@ def _get_semaphore() -> asyncio.Semaphore:
 
 class DetonateRequest(BaseModel):
     scan_id: str
-    target_url: str
+    target_url: HttpUrl
     timeout_sec: int = 120
 
 
@@ -67,7 +68,7 @@ class DetonateResponse(BaseModel):
 
 @app.post("/detonate", response_model=DetonateResponse)
 async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
-    if not x_runner_auth or x_runner_auth != SANDBOX_RUNNER_SECRET:
+    if not x_runner_auth or not hmac.compare_digest(x_runner_auth, SANDBOX_RUNNER_SECRET):
         logger.warning("[admission-control] Unauthorized detonation attempt rejected")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -115,7 +116,7 @@ async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
             "--memory", "2g",
             "--cpus", "1.5",
             "--shm-size", "1gb",
-            "-v", f"{SHARED_VOLUME_NAME}:/app/output",
+            "--mount", f"type=volume,source={SHARED_VOLUME_NAME},target=/app/output,volume-subpath={scan_id}",
             SANDBOX_IMAGE,
             target_url,
             "--output-dir", "/app/output",

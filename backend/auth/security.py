@@ -4,12 +4,77 @@ auth/security.py
 """
 
 import hashlib
+import hmac
+import logging
 import bcrypt
+import redis
 
 from typing import Tuple
 from config import settings
 
+logger = logging.getLogger(__name__)
+
 _MAX_PASSWORD_BYTES = 72
+
+try:
+    _redis_auth_client = redis.from_url(settings.REDIS_URL)
+except Exception as e:
+    logger.warning("Could not initialize Redis client for account lockout: %s", e)
+    _redis_auth_client = None
+
+
+def check_account_lockout(email: str) -> bool:
+    """
+    Returns True if account is currently locked out due to excessive failed login attempts.
+    """
+    if not _redis_auth_client:
+        if getattr(settings, "AUTH_LOCKOUT_FAIL_CLOSED", True) or settings.is_production:
+            logger.error("Redis unavailable during account lockout check (fail-closed)")
+            raise ValueError("Authentication store unavailable")
+        return False
+    normalized_email = email.lower().strip()
+    try:
+        attempts = _redis_auth_client.get(f"login_attempts:{normalized_email}")
+        if attempts and int(attempts) >= settings.MAX_LOGIN_ATTEMPTS:
+            return True
+        return False
+    except redis.exceptions.RedisError as e:
+        logger.error("Redis error checking account lockout for %s: %s", normalized_email, e)
+        if getattr(settings, "AUTH_LOCKOUT_FAIL_CLOSED", True) or settings.is_production:
+            raise ValueError("Authentication store unavailable")
+        return False
+
+
+def record_failed_login(email: str) -> int:
+    """
+    Increments failed login counter for normalized email. Sets expiration on first failure.
+    Returns new attempt count.
+    """
+    if not _redis_auth_client:
+        return 0
+    normalized_email = email.lower().strip()
+    key = f"login_attempts:{normalized_email}"
+    try:
+        count = _redis_auth_client.incr(key)
+        if count == 1:
+            _redis_auth_client.expire(key, settings.LOCKOUT_DURATION_SECONDS)
+        return count
+    except redis.exceptions.RedisError as e:
+        logger.error("Redis error recording failed login for %s: %s", normalized_email, e)
+        return 0
+
+
+def reset_failed_login(email: str) -> None:
+    """
+    Resets failed login counter on successful login.
+    """
+    if not _redis_auth_client:
+        return
+    normalized_email = email.lower().strip()
+    try:
+        _redis_auth_client.delete(f"login_attempts:{normalized_email}")
+    except redis.exceptions.RedisError as e:
+        logger.warning("Redis error resetting failed login for %s: %s", normalized_email, e)
 
 
 def _pre_hash(password: str) -> bytes:
