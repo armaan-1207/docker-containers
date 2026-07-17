@@ -215,6 +215,7 @@ services:
     networks:
       - aegis_net          # Postgres, Redis
       - docker_proxy_net   # docker_socket_proxy only reachable here
+      - sandbox_net        # ensures dockercontainers_sandbox_net is created automatically
     entrypoint: ["/app/celery_entrypoint.sh"]
     command: >
       celery -A celery_worker worker
