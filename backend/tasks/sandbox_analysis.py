@@ -37,12 +37,14 @@ from config import settings
 from services.malware_scanner import scan_file_clamav
 from database.database import get_db_session
 from database.models import Scan
+from tasks import validate_scan_id
 
 logger = logging.getLogger(__name__)
 
 SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", settings.SANDBOX_IMAGE)
 SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", settings.SHARED_SCANS_VOLUME)
 SANDBOX_RUNNER_URL = os.environ.get("SANDBOX_RUNNER_URL", "http://aegis_sandbox_runner:8002/detonate")
+SANDBOX_RUNNER_SECRET = os.environ.get("SANDBOX_RUNNER_SECRET", "aegis-runner-internal-secret-token")
 
 # Network to attach the sandbox container to (must be isolated from aegis_net).
 #
@@ -80,11 +82,6 @@ else:
         "Run `docker volume ls` to find the exact shared volume name (e.g. dockercontainers_shared_scans) "
         "and set SHARED_SCANS_VOLUME explicitly."
     )
-
-
-def validate_scan_id(scan_id: str) -> None:
-    if not isinstance(scan_id, str) or not scan_id.isalnum():
-        raise ValueError(f"Invalid scan_id: {scan_id}")
 
 
 def _scan_dir(scan_id: str) -> str:
@@ -135,7 +132,10 @@ async def _run_sandbox_container(scan_id: str, target_url: str, timeout_sec: int
         req = urllib.request.Request(
             SANDBOX_RUNNER_URL,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-Runner-Auth": SANDBOX_RUNNER_SECRET,
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=timeout_sec + 15) as resp:

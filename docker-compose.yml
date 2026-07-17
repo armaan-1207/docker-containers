@@ -243,6 +243,8 @@ services:
       SANDBOX_NETWORK: aegis_sandbox_net
       SHARED_SCANS_VOLUME: aegis_shared_scans
       SANDBOX_IMAGE: aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9
+      SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:-aegis-runner-internal-secret-token}
+      MAX_CONCURRENT_DETONATIONS: "10"
     networks:
       - aegis_net          # celery_worker communicates here via RPC
       - docker_proxy_net   # docker_socket_proxy ONLY reachable by this service
@@ -282,6 +284,7 @@ services:
       --hostname=worker@%h
     environment:
       SANDBOX_RUNNER_URL: http://aegis_sandbox_runner:8002/detonate
+      SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:-aegis-runner-internal-secret-token}
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
       SANDBOX_NETWORK: aegis_sandbox_net

@@ -202,26 +202,26 @@ async def _handle_client(client_reader, client_writer, upstream_proxy, allow_pri
     async with sem:
         try:
             request_line_bytes = await client_reader.readline()
-        if not request_line_bytes:
-            return
-        request_line = request_line_bytes.decode(errors="ignore").strip()
+            if not request_line_bytes:
+                return
+            request_line = request_line_bytes.decode(errors="ignore").strip()
 
-        headers_blob = b""
-        while True:
-            line = await client_reader.readline()
-            headers_blob += line
-            if line in (b"\r\n", b""):
-                break
+            headers_blob = b""
+            while True:
+                line = await client_reader.readline()
+                headers_blob += line
+                if line in (b"\r\n", b""):
+                    break
 
-        if request_line.upper().startswith("CONNECT"):
-            _, target, _ = request_line.split(" ", 2)
-            host, _, port_str = target.partition(":")
-            port = int(port_str) if port_str else 443
-            await _handle_connect(client_reader, client_writer, host, port,
-                                  upstream_proxy, allow_private_targets)
-        else:
-            await _handle_plain_http(client_reader, client_writer, request_line, headers_blob,
+            if request_line.upper().startswith("CONNECT"):
+                _, target, _ = request_line.split(" ", 2)
+                host, _, port_str = target.partition(":")
+                port = int(port_str) if port_str else 443
+                await _handle_connect(client_reader, client_writer, host, port,
                                       upstream_proxy, allow_private_targets)
+            else:
+                await _handle_plain_http(client_reader, client_writer, request_line, headers_blob,
+                                          upstream_proxy, allow_private_targets)
         except Exception as e:
             logger.debug("egress proxy client handler ended: %s", e)
         finally:

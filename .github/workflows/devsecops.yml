@@ -41,11 +41,15 @@ jobs:
 
       - name: Run Dependency Vulnerability Audit (pip-audit)
         run: |
-          pip-audit -r backend/requirements.txt -r sandbox/docker/requirements.txt
+          pip-audit -r backend/requirements.txt -r sandbox/docker/requirements.txt --strict --desc on
 
   container-security:
-    name: Container Build & Trivy Image Scanning
+    name: Container Build, Trivy Scanning, SBOM & Cosign
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # Required for keyless OIDC Cosign signing
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
@@ -53,11 +57,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.2.4'
+
       - name: Build Sandbox Image locally for vulnerability scan
         run: |
           docker build -f sandbox/docker/Dockerfile -t aegis-sandbox:ci .
 
-      - name: Run Trivy Vulnerability Scanner on Sandbox Image
+      - name: Run Trivy Scanner (Non-blocking Full Audit including unfixed CVEs)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'aegis-sandbox:ci'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: false
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Run Trivy Vulnerability Scanner on Sandbox Image (Blocking for Fixed CVEs)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'aegis-sandbox:ci'
@@ -67,11 +86,16 @@ jobs:
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
 
+      - name: Generate CycloneDX SBOM for Sandbox Image
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
+            image --format cyclonedx --output /tmp/sbom-sandbox.json aegis-sandbox:ci
+
       - name: Build Backend Image locally for vulnerability scan
         run: |
           docker build -f backend/Dockerfile -t aegis-backend:ci ./backend
 
-      - name: Run Trivy Vulnerability Scanner on Backend Image
+      - name: Run Trivy Scanner on Backend Image (Blocking for Fixed CVEs)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'aegis-backend:ci'
@@ -80,3 +104,21 @@ jobs:
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
+
+      - name: Generate CycloneDX SBOM for Backend Image
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
+            image --format cyclonedx --output /tmp/sbom-backend.json aegis-backend:ci
+
+      - name: Upload CycloneDX SBOM Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyclone-dx-sboms
+          path: /tmp/sbom-*.json
+          retention-days: 14
+
+      - name: Verify Cosign Installation & Display Keyless OIDC Signing Notice
+        run: |
+          cosign version
+          echo "[+] Cosign v2 is ready for keyless OIDC signing (or local private key) upon registry push."
+

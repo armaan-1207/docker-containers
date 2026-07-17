@@ -105,3 +105,23 @@ async def test_quic_and_websocket_ssrf_blocked():
     assert await is_target_allowed("https://10.0.0.1:443/quic-endpoint") is False
     assert await is_target_allowed("wss://127.0.0.1:8080/ws") is False
     assert await resolve_validated_ip("169.254.169.254") is None
+
+
+@pytest.mark.asyncio
+async def test_egress_proxy_handle_client_end_to_end():
+    """Regression test specifically verifying egress_proxy imports cleanly and _handle_client executes properly."""
+    import egress_proxy
+    server = await egress_proxy.start_egress_proxy(port=0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"GET http://127.0.0.1:8000/test HTTP/1.1\r\nHost: 127.0.0.1:8000\r\n\r\n")
+        await writer.drain()
+        response = await reader.read(1024)
+        assert b"403 Forbidden" in response or b"Bad Gateway" in response or b"400 Bad Request" in response
+        writer.close()
+        await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+
