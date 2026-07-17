@@ -138,6 +138,22 @@ def file_cleanup_task(self, retention_days: int = 14) -> dict:
                 logger.warning("[file_cleanup] Failed to remove orphan %s", path, exc_info=True)
                 errors += 1
 
+    # ── 3. Quarantined download samples inside shared_dir/quarantine ──────
+    quarantine_dir = os.path.join(shared_dir, "quarantine")
+    if os.path.exists(quarantine_dir):
+        try:
+            with os.scandir(quarantine_dir) as qentries:
+                for qentry in qentries:
+                    if qentry.is_file(follow_symlinks=False):
+                        try:
+                            if qentry.stat(follow_symlinks=False).st_mtime <= cutoff_ts:
+                                os.remove(qentry.path)
+                                orphans_removed += 1
+                        except OSError:
+                            errors += 1
+        except OSError:
+            pass
+
     summary = {
         "status": "ok",
         "shared_dir": shared_dir,

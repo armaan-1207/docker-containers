@@ -67,6 +67,15 @@ except ImportError:
 logger = logging.getLogger("phishing_sandbox.egress_proxy")
 
 DEFAULT_PORT = 3128
+_MAX_CONCURRENT_TUNNELS = 50
+_tunnel_semaphore = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    global _tunnel_semaphore
+    if _tunnel_semaphore is None:
+        _tunnel_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_TUNNELS)
+    return _tunnel_semaphore
 
 
 async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -175,8 +184,24 @@ async def _handle_plain_http(client_reader, client_writer, request_line, headers
 
 
 async def _handle_client(client_reader, client_writer, upstream_proxy, allow_private_targets):
-    try:
-        request_line_bytes = await client_reader.readline()
+    sem = _get_semaphore()
+    if sem.locked():
+        logger.warning("Egress proxy concurrency limit (%d) reached — rejecting connection", _MAX_CONCURRENT_TUNNELS)
+        try:
+            client_writer.write(b"HTTP/1.1 429 Too Many Requests\r\n\r\n")
+            await client_writer.drain()
+        except Exception:
+            pass
+        finally:
+            try:
+                client_writer.close()
+            except Exception:
+                pass
+        return
+
+    async with sem:
+        try:
+            request_line_bytes = await client_reader.readline()
         if not request_line_bytes:
             return
         request_line = request_line_bytes.decode(errors="ignore").strip()
@@ -197,13 +222,13 @@ async def _handle_client(client_reader, client_writer, upstream_proxy, allow_pri
         else:
             await _handle_plain_http(client_reader, client_writer, request_line, headers_blob,
                                       upstream_proxy, allow_private_targets)
-    except Exception as e:
-        logger.debug("egress proxy client handler ended: %s", e)
-    finally:
-        try:
-            client_writer.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("egress proxy client handler ended: %s", e)
+        finally:
+            try:
+                client_writer.close()
+            except Exception:
+                pass
 
 
 async def start_egress_proxy(port=DEFAULT_PORT, upstream_proxy=None, allow_private_targets=False):

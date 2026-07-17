@@ -1,0 +1,24 @@
+# ==============================================================================
+# AEGIS Sandbox Runner Microservice (`aegis_sandbox_runner`)
+# Purpose: Admission-control API gateway in front of `docker_socket_proxy`.
+# Only this container receives DOCKER_HOST access (`docker_proxy_net`).
+# ==============================================================================
+
+FROM python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl docker-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir fastapi uvicorn pydantic
+
+RUN groupadd --gid 1002 runner \
+    && useradd --uid 1002 --gid runner --shell /bin/bash --create-home runner
+
+WORKDIR /app
+COPY --chown=runner:runner services/sandbox_runner_svc.py /app/sandbox_runner_svc.py
+
+USER runner
+EXPOSE 8002
+
+ENTRYPOINT ["python", "/app/sandbox_runner_svc.py"]

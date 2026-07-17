@@ -866,7 +866,10 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-quic",
-                    "--disable-features=QUIC,HttpsFirstBalancedModeAutoEnable",
+                    "--disable-webrtc",
+                    "--enforce-webrtc-ip-permission-check",
+                    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                    "--disable-features=QUIC,HttpsFirstBalancedModeAutoEnable,WebRtcHideLocalIpsWithMdns",
                 ],
             )
         context_kwargs = {
@@ -1641,6 +1644,20 @@ def main():
                 except OSError:
                     pass
                 result["screenshots"][key] = dst
+
+        # Move quarantined downloads so samples survive ephemeral container exit (finding #3)
+        quarantine_dst_dir = os.path.join(args.output_dir, "quarantine")
+        for drow in result.get("downloads", []):
+            qpath = drow.get("quarantined_path")
+            if qpath and os.path.exists(qpath):
+                os.makedirs(quarantine_dst_dir, exist_ok=True)
+                dst = os.path.join(quarantine_dst_dir, os.path.basename(qpath))
+                shutil.move(qpath, dst)
+                try:
+                    os.chmod(dst, 0o664)  # nosec B103
+                except OSError:
+                    pass
+                drow["quarantined_path"] = dst
 
         json_path = os.path.join(args.output_dir, f"scan_{scan_id}.json")
         _atomic_write_json(json_path, result)

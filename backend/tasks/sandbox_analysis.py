@@ -28,6 +28,8 @@ import glob
 import json
 import logging
 import os
+import urllib.request
+import urllib.error
 from typing import Tuple
 
 from celery_worker import celery
@@ -40,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", settings.SANDBOX_IMAGE)
 SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", settings.SHARED_SCANS_VOLUME)
+SANDBOX_RUNNER_URL = os.environ.get("SANDBOX_RUNNER_URL", "http://aegis_sandbox_runner:8002/detonate")
 
 # Network to attach the sandbox container to (must be isolated from aegis_net).
 #
@@ -63,9 +66,8 @@ if _SANDBOX_NETWORK_ENV:
 else:
     raise RuntimeError(
         "FATAL: SANDBOX_NETWORK is not set in environment or backend/.env. "
-        "Refusing to start worker or execute sandbox scans. "
-        "Run `docker network ls` to find the exact bridge network name (e.g. dockercontainers_sandbox_net) "
-        "and set SANDBOX_NETWORK explicitly."
+        "Set it explicitly (e.g. SANDBOX_NETWORK=aegis_sandbox_net) to match "
+        "docker-compose.yml so container attachment succeeds across directories."
     )
 
 _SHARED_VOLUME_ENV = os.environ.get("SHARED_SCANS_VOLUME") or getattr(settings, "SHARED_SCANS_VOLUME", None)
@@ -78,6 +80,11 @@ else:
         "Run `docker volume ls` to find the exact shared volume name (e.g. dockercontainers_shared_scans) "
         "and set SHARED_SCANS_VOLUME explicitly."
     )
+
+
+def validate_scan_id(scan_id: str) -> None:
+    if not isinstance(scan_id, str) or not scan_id.isalnum():
+        raise ValueError(f"Invalid scan_id: {scan_id}")
 
 
 def _scan_dir(scan_id: str) -> str:
@@ -106,56 +113,46 @@ def _get_scan_url(scan_id: str) -> str:
 
 async def _run_sandbox_container(scan_id: str, target_url: str, timeout_sec: int) -> None:
     """
-    Spawn the aegis-sandbox container via `docker run`.
+    Invoke the aegis_sandbox_runner microservice over HTTP (`POST /detonate`)
+    instead of calling `docker run` directly.
 
-    The Docker client inside the Celery worker reads DOCKER_HOST from the
-    environment (set to tcp://docker_socket_proxy:2375 in docker-compose.yml)
-    so all Docker API calls are routed through the scoped socket proxy rather
-    than the raw host socket.
-
-    Security: sandbox container is attached to SANDBOX_NETWORK (sandbox_net)
-    which has zero routing path to aegis_net / Postgres / Redis.
+    Security Hardening (DevSecOps Critical Finding #1):
+      Celery workers process untrusted screenshots and image bytes. By offloading
+      container detonation to the single-purpose `aegis_sandbox_runner` service,
+      the Celery worker has ZERO access to the Docker API (`docker_socket_proxy`).
+      If an attacker achieves parser RCE inside the worker via pytesseract or
+      OpenCV, they cannot call `docker run -v /:/host` or `privileged: true`.
     """
-    cmd = [
-        "docker", "run", "--rm",
-        "--network", SANDBOX_NETWORK,           # isolated network (finding #9)
-        "--cap-drop", "ALL",                    # drop all Linux capabilities
-        "--security-opt", "no-new-privileges:true",
-        "--read-only",
-        "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",  # nosec B108
-        "--tmpfs", "/home/sandbox/.config:rw,noexec,nosuid,size=32m",
-        "--tmpfs", "/home/sandbox/.pki:rw,noexec,nosuid,size=16m",
-        "--tmpfs", "/home/sandbox/.local:rw,noexec,nosuid,size=32m",
-        "--pids-limit", "512",
-        "--memory", "2g",
-        "--cpus", "1.5",                        # reconciled with sandbox/docker/docker-compose.yml
-        "--shm-size", "1gb",                    # reconciled with sandbox/docker/docker-compose.yml
-        "-v", f"{SHARED_VOLUME_NAME}:/app/output",
-        SANDBOX_IMAGE,
-        target_url,
-        "--output-dir", "/app/output",
-        "--request-id", scan_id,
-    ]
-    logger.info("[%s] spawning sandbox container: %s", scan_id, " ".join(cmd))
+    logger.info("[%s] Requesting admission control detonation via %s", scan_id, SANDBOX_RUNNER_URL)
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise TimeoutError(f"sandbox container for scan {scan_id} exceeded {timeout_sec}s")
+    payload = json.dumps({
+        "scan_id": scan_id,
+        "target_url": target_url,
+        "timeout_sec": timeout_sec,
+    }).encode("utf-8")
 
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"sandbox container exited {proc.returncode} for scan {scan_id}: "
-            f"{stderr.decode(errors='ignore')[:2000]}"
+    def _do_rpc():
+        req = urllib.request.Request(
+            SANDBOX_RUNNER_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-    logger.debug("[%s] sandbox container stdout: %s", scan_id, stdout.decode(errors="ignore")[:500])
+        with urllib.request.urlopen(req, timeout=timeout_sec + 15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    try:
+        resp_data = await asyncio.to_thread(_do_rpc)
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="ignore")[:1000]
+        raise RuntimeError(f"Sandbox runner service failed (HTTP {e.code}) for scan {scan_id}: {err_body}")
+    except Exception as e:
+        raise RuntimeError(f"Could not reach sandbox runner service for scan {scan_id}: {e}")
+
+    if resp_data.get("status") != "success" or resp_data.get("returncode") != 0:
+        raise RuntimeError(f"Sandbox detonation failed for scan {scan_id}: {resp_data}")
+
+    logger.debug("[%s] Sandbox runner response: %s", scan_id, resp_data)
 
 
 def _find_result_by_request_id(scan_id: str) -> Tuple[str, dict]:
@@ -219,6 +216,20 @@ def _call_sandbox(scan_id: str) -> dict:
         if not clean_screenshot:
             is_clean = False
             details += f" | Screenshot: {scr_details}"
+
+    for drow in sandbox_result.get("downloads", []):
+        qpath = drow.get("quarantined_path")
+        if qpath:
+            if not os.path.exists(qpath):
+                worker_qpath = os.path.join(settings.SHARED_DIR, "quarantine", os.path.basename(qpath))
+                if os.path.exists(worker_qpath):
+                    qpath = worker_qpath
+            if os.path.exists(qpath):
+                clean_dl, dl_details = scan_file_clamav(qpath)
+                drow["malware_scan"] = {"is_clean": clean_dl, "details": dl_details}
+                if not clean_dl:
+                    is_clean = False
+                    details += f" | Download '{drow.get('file_name', 'bin')}': {dl_details}"
 
     sandbox_result["malware_scan"] = {
         "is_clean": is_clean,

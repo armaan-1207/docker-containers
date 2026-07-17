@@ -231,6 +231,37 @@ services:
           memory: 128M
 
   # ---------------------------------------------------
+  # 5b. SANDBOX RUNNER — Purpose-Built Admission Control
+  # ---------------------------------------------------
+  aegis_sandbox_runner:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.runner
+    container_name: aegis_sandbox_runner
+    environment:
+      DOCKER_HOST: tcp://docker_socket_proxy:2375
+      SANDBOX_NETWORK: aegis_sandbox_net
+      SHARED_SCANS_VOLUME: aegis_shared_scans
+      SANDBOX_IMAGE: aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9
+    networks:
+      - aegis_net          # celery_worker communicates here via RPC
+      - docker_proxy_net   # docker_socket_proxy ONLY reachable by this service
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    restart: unless-stopped
+    depends_on:
+      docker_socket_proxy:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ---------------------------------------------------
   # 6. CELERY WORKER — Task Runner
   # ---------------------------------------------------
   celery_worker:
@@ -240,8 +271,7 @@ services:
       dockerfile: Dockerfile.worker
     container_name: aegis_celery_worker
     networks:
-      - aegis_net          # Postgres, Redis
-      - docker_proxy_net   # docker_socket_proxy only reachable here
+      - aegis_net          # Postgres, Redis, aegis_sandbox_runner
       - sandbox_net        # ensures dockercontainers_sandbox_net is created automatically
     entrypoint: ["/app/celery_entrypoint.sh"]
     command: >
@@ -251,7 +281,7 @@ services:
       --queues=default,sandbox,alerts
       --hostname=worker@%h
     environment:
-      DOCKER_HOST: tcp://docker_socket_proxy:2375
+      SANDBOX_RUNNER_URL: http://aegis_sandbox_runner:8002/detonate
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
       SANDBOX_NETWORK: aegis_sandbox_net
@@ -261,7 +291,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      docker_socket_proxy:
+      aegis_sandbox_runner:
         condition: service_started
       clamav:
         condition: service_healthy

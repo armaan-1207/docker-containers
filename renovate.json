@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    ":pinDigestsDisabled"
+  ],
+  "pinDigests": true,
+  "docker": {
+    "pinDigests": true
+  },
+  "packageRules": [
+    {
+      "description": "Automatically pin base images in Dockerfiles and Compose files by SHA256 digest",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "pinDigests": true
+    },
+    {
+      "description": "Group Python dependency updates together",
+      "matchManagers": ["pip_requirements"],
+      "groupName": "python dependencies"
+    }
+  ]
+}

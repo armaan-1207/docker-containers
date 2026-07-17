@@ -17,10 +17,10 @@ RUN groupadd --gid 1001 aegis \
     && useradd --uid 1001 --gid aegis --shell /bin/bash --create-home aegis
 WORKDIR /app
 
-# docker-cli lives ONLY in this image — the worker is the one service
-# that ever needs to reach docker_socket_proxy to spawn sandbox containers.
+# Celery worker processes OCR, computer vision, and machine learning models.
+# It no longer requires docker-cli or access to docker_socket_proxy (Critical Finding #1).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 tesseract-ocr libzbar0 curl docker-cli clamav \
+    libpq5 tesseract-ocr libzbar0 curl clamav \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /usr/local

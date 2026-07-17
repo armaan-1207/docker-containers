@@ -1,0 +1,82 @@
+name: AEGIS DevSecOps CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run weekly every Monday at 04:00 UTC to catch newly disclosed CVEs
+    - cron: '0 4 * * 1'
+
+jobs:
+  security-and-sast:
+    name: Secrets & Code SAST (Gitleaks, Bandit, Dependency Audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install SAST & Dependency Audit Tools
+        run: |
+          pip install --upgrade pip
+          pip install bandit pip-audit
+
+      - name: Run Gitleaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+      - name: Run Bandit Python SAST
+        run: |
+          bandit -r backend/ sandbox/backend/ -ll -ii
+
+      - name: Run Dependency Vulnerability Audit (pip-audit)
+        run: |
+          pip-audit -r backend/requirements.txt -r sandbox/docker/requirements.txt
+
+  container-security:
+    name: Container Build & Trivy Image Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Sandbox Image locally for vulnerability scan
+        run: |
+          docker build -f sandbox/docker/Dockerfile -t aegis-sandbox:ci .
+
+      - name: Run Trivy Vulnerability Scanner on Sandbox Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'aegis-sandbox:ci'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Build Backend Image locally for vulnerability scan
+        run: |
+          docker build -f backend/Dockerfile -t aegis-backend:ci ./backend
+
+      - name: Run Trivy Vulnerability Scanner on Backend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'aegis-backend:ci'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
