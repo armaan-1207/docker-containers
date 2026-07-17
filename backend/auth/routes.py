@@ -111,7 +111,11 @@ def login(
     if needs_rehash:
         user.hashed_password = hash_password(form_data.password)
         db.commit()
-        logger.info("Automatically upgraded legacy password hash to SHA-256 pre-hash format for user: %s", user.email)
+        logger.warning(
+            "[Legacy Bcrypt Alert] User %s authenticated via legacy truncated bcrypt path. "
+            "Upgraded hash automatically. Monitor metric to disable ALLOW_LEGACY_BCRYPT once zero.",
+            user.email,
+        )
 
     if hasattr(user, "is_active") and not user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")

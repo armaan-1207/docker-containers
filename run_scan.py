@@ -94,7 +94,7 @@ for _ in range(18):
     status_query = [
         "docker", "exec", "-u", "postgres", "aegis_postgres",
         "psql", "-d", "aegis_db", "-v", f"scan_id={scan_id}", "-t",
-        "-c", "SELECT status, risk_score, severity FROM scans WHERE id = :scan_id;"
+        "-c", "SELECT status, risk_score, severity FROM scans WHERE id = :'scan_id';"
     ]
     row = run_cmd(status_query).strip()
     parts = [p.strip() for p in row.split('|')] if '|' in row else [row]

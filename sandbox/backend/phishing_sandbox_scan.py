@@ -1462,6 +1462,14 @@ async def check_cloaking(browser, url, viewport, allow_private_targets=False, eg
         return None
     proxy_kwarg = {"proxy": {"server": f"http://127.0.0.1:{egress_proxy_port}"}} if egress_proxy_port else {}
 
+    async def _ssrf_guard_route(route):
+        target = route.request.url
+        if await is_target_allowed(target, allow_private_targets):
+            await route.continue_()
+        else:
+            logger.warning("check_cloaking SSRF guard blocked request to %s", target)
+            await route.abort()
+
     normal_ctx = None
     bot_ctx = None
     try:
@@ -1475,6 +1483,7 @@ async def check_cloaking(browser, url, viewport, allow_private_targets=False, eg
         # corresponding close() with no cleanup path at all.
         try:
             normal_ctx = await browser.new_context(viewport={"width": viewport[0], "height": viewport[1]}, **proxy_kwarg)
+            await normal_ctx.route("**/*", _ssrf_guard_route)
             normal_page = await normal_ctx.new_page()
             await normal_page.goto(url, wait_until="load", timeout=20000)
             normal_text = await normal_page.inner_text("body")
@@ -1486,6 +1495,7 @@ async def check_cloaking(browser, url, viewport, allow_private_targets=False, eg
             bot_ctx = await browser.new_context(user_agent=USER_AGENT_BOT,
                                                  viewport={"width": viewport[0], "height": viewport[1]},
                                                  **proxy_kwarg)
+            await bot_ctx.route("**/*", _ssrf_guard_route)
             bot_page = await bot_ctx.new_page()
             await bot_page.goto(url, wait_until="load", timeout=20000)
             bot_text = await bot_page.inner_text("body")

@@ -305,7 +305,7 @@ services:
     build:
       context: ./sandbox
       dockerfile: docker/Dockerfile
-    image: aegis-sandbox:v1.0.0@sha256:45b23dee08af5e43a7fea6c4cf9c25ccf269ee113168c19722f87876677c5cb2
+    image: ${SANDBOX_IMAGE:-aegis-sandbox:v1.0.0}
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:

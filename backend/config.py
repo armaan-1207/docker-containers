@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     ALLOW_LEGACY_BCRYPT: bool = True
-    CLAMAV_FAIL_CLOSED: bool = False
+    CLAMAV_FAIL_CLOSED: bool = True
 
     # -------------------------
     # CORS (finding #16)
@@ -217,7 +217,7 @@ class Settings(BaseSettings):
     ARTIFACT_RETENTION_DAYS: int = 14
 
     SANDBOX_NETWORK: Optional[str] = None
-    SANDBOX_IMAGE: str = "aegis-sandbox:v1.0.0@sha256:45b23dee08af5e43a7fea6c4cf9c25ccf269ee113168c19722f87876677c5cb2"
+    SANDBOX_IMAGE: str = "aegis-sandbox:v1.0.0"
     SHARED_SCANS_VOLUME: Optional[str] = None
     SANDBOX_TIMEOUT_SEC: int = 120
 
@@ -278,4 +278,10 @@ if not settings.DEBUG:
         raise RuntimeError(
             f"SANDBOX_IMAGE ('{settings.SANDBOX_IMAGE}') uses mutable tag or lacks @sha256 digest while DEBUG=False. "
             "Pin SANDBOX_IMAGE by immutable digest before deploying."
+        )
+
+    if not settings.CLAMAV_FAIL_CLOSED:
+        raise RuntimeError(
+            "CLAMAV_FAIL_CLOSED is False while DEBUG=False. "
+            "Anti-malware scanning must be set to fail-closed in production to prevent un-scanned artifact ingestion."
         )
