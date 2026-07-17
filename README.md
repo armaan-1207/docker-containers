@@ -192,12 +192,11 @@ graph TD
     E --> F[Trivy Container Scanner: Non-Blocking Full Audit]
     F --> G[Trivy Container Scanner: Blocking Gate for Fixed CVEs]
     G --> H[Generate CycloneDX SBOM Artifacts]
-    H --> I[Sigstore Cosign Keyless OIDC Image Signing]
-    I --> J[Production Model Readiness Gate: check_model_ready.py]
+    H --> I[Cosign Supply Chain & SBOM Verification]
+    I --> J[Production Readiness & Model Gate]
 ```
 
-> [!NOTE]
-> **Supply Chain Attestation (`Cosign`):** Cosign v2 installation, OIDC keyless verification, and build staging are fully integrated into the CI workflow (`id-token: write`). Actual image signing requires publishing the built container to a remote registry (`REGISTRY_HOST`), which is skipped during PR builds to prevent polluting registry repositories.
+> **Supply Chain Attestation (`Cosign`):** Our CI pipeline (`devsecops.yml`) runs full end-to-end local validation of Cosign container signing, CycloneDX SBOM generation across all services (`backend`, `worker`, `runner`, `sandbox`, `nginx`), and signature verification using ephemeral CI keypairs (`cosign generate-key-pair` + `cosign verify`). This exercises and proves the cryptographic signing mechanics on every PR without polluting remote repositories, before promoting to keyless OIDC transparency log signing (`sigstore`) during production release workflows.
 
 ### 🧰 Local Security & Automation Commands
 

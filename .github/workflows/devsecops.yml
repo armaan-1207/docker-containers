@@ -77,6 +77,10 @@ jobs:
         run: |
           docker build -f backend/Dockerfile.runner -t aegis-runner:ci ./backend
 
+      - name: Build Worker Image locally for vulnerability scan
+        run: |
+          docker build -f backend/Dockerfile.worker -t aegis-worker:ci ./backend
+
       - name: Pull Nginx Image locally for vulnerability scan
         run: |
           docker pull nginx:1.27-alpine
@@ -130,6 +134,16 @@ jobs:
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
 
+      - name: Run Trivy Scanner on Worker Image (Blocking for Fixed CVEs)
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        with:
+          image-ref: 'aegis-worker:ci'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+
       - name: Run Trivy Scanner on Nginx Image (Blocking for Fixed CVEs)
         uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
         with:
@@ -140,12 +154,14 @@ jobs:
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
 
-      - name: Generate CycloneDX SBOMs for Backend, Runner, and Nginx
+      - name: Generate CycloneDX SBOMs for Backend, Runner, Worker, and Nginx
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
             image --format cyclonedx --output /tmp/sbom-backend.json aegis-backend:ci
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
             image --format cyclonedx --output /tmp/sbom-runner.json aegis-runner:ci
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
+            image --format cyclonedx --output /tmp/sbom-worker.json aegis-worker:ci
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
             image --format cyclonedx --output /tmp/sbom-nginx.json nginx:1.27-alpine
 
@@ -160,25 +176,31 @@ jobs:
         env:
           COSIGN_PASSWORD: "ephemeral-ci-test-password"
         run: |
+          # Note: This step verifies local end-to-end Cosign signing and verification mechanics
+          # before promotion to keyless OIDC transparency logs (`sigstore`) in release pipelines.
           cosign version
           docker run -d -p 5001:5000 --name local-registry registry:2
           
           docker tag aegis-sandbox:ci localhost:5001/aegis-sandbox:ci
           docker tag aegis-backend:ci localhost:5001/aegis-backend:ci
           docker tag aegis-runner:ci localhost:5001/aegis-runner:ci
+          docker tag aegis-worker:ci localhost:5001/aegis-worker:ci
           
           docker push localhost:5001/aegis-sandbox:ci
           docker push localhost:5001/aegis-backend:ci
           docker push localhost:5001/aegis-runner:ci
+          docker push localhost:5001/aegis-worker:ci
           
           cosign generate-key-pair --output-key-prefix /tmp/aegis-ci
           cosign sign --yes --key /tmp/aegis-ci.key localhost:5001/aegis-sandbox:ci
           cosign sign --yes --key /tmp/aegis-ci.key localhost:5001/aegis-backend:ci
           cosign sign --yes --key /tmp/aegis-ci.key localhost:5001/aegis-runner:ci
+          cosign sign --yes --key /tmp/aegis-ci.key localhost:5001/aegis-worker:ci
           
           cosign verify --key /tmp/aegis-ci.pub localhost:5001/aegis-sandbox:ci
           cosign verify --key /tmp/aegis-ci.pub localhost:5001/aegis-backend:ci
           cosign verify --key /tmp/aegis-ci.pub localhost:5001/aegis-runner:ci
+          cosign verify --key /tmp/aegis-ci.pub localhost:5001/aegis-worker:ci
           echo "[+] End-to-End supply-chain signing and signature verification succeeded!"
 
   model-readiness-gate:

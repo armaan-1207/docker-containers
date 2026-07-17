@@ -29,6 +29,7 @@ x-backend-common: &backend-common
   environment:
     - AEGIS_DB_PASSWORD=${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
     - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    - REQUIRE_REAL_CERT=${REQUIRE_REAL_CERT:-false}
   volumes:
     - shared_scans:/shared/scans
   networks:
@@ -398,6 +399,13 @@ services:
     image: ${SANDBOX_IMAGE:-aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9}
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    # --- Security notice (Volume Scoping & Isolation - Finding #3) ---
+    # This standalone/manual profile mounts the entire `shared_scans` volume at `/app/output`
+    # for local debugging (`aegis.ps1 sandbox <url>`). Any container executed via this profile
+    # can read or overwrite existing scan artifacts across all past scans on the shared volume.
+    # For automated production pipelines, ALWAYS use the `aegis_sandbox_runner` admission-control
+    # microservice (POST /detonate), which dynamically isolates each scan using `--mount
+    # type=volume,source=shared_scans,target=/app/output,volume-subpath=<scan_id>`.
     volumes:
       - shared_scans:/app/output
     networks:

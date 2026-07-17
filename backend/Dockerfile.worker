@@ -20,7 +20,7 @@ WORKDIR /app
 # Celery worker processes OCR, computer vision, and machine learning models.
 # It no longer requires docker-cli or access to docker_socket_proxy (Critical Finding #1).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 tesseract-ocr libzbar0 curl clamav \
+    libpq5 tesseract-ocr libzbar0 curl clamav postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /usr/local

@@ -17,6 +17,7 @@ Registered task names (must match @celery.task(name=...) in tasks/):
     "tasks.risk_fusion"
     "tasks.alert_pipeline"
     "tasks.file_cleanup"   ← NEW (finding #8 fix)
+    "tasks.db_backup"      ← NEW (Finding #6 fix)
 
 Security fix (finding #8):
   The previous beat_schedule was empty ({}) which meant scan artifacts
@@ -80,6 +81,16 @@ celery.conf.beat_schedule = {
         "task": "tasks.job_reconciliation",
         "schedule": crontab(minute="*/10"),     # every 10 minutes
         "kwargs": {"timeout_minutes": 30},
+        "options": {"queue": "default"},
+    },
+
+    # ── Automated DB backup (Finding #6 fix) ───────────────────────────────
+    # Runs daily at 03:00 UTC. Executes logical database backup (pg_dump -F c)
+    # into /shared/scans/db_backups/ and automatically purges dumps older than 7 days.
+    "daily-db-backup": {
+        "task": "tasks.db_backup",
+        "schedule": crontab(hour=3, minute=0),  # daily at 03:00 UTC
+        "kwargs": {"retention_days": 7},
         "options": {"queue": "default"},
     },
 }

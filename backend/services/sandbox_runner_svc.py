@@ -30,6 +30,35 @@ logger = logging.getLogger("sandbox_runner_svc")
 
 app = FastAPI(title="AEGIS Sandbox Runner Service", version="1.0.0")
 
+
+@app.on_event("startup")
+async def verify_kernel_ssrf_firewall():
+    """
+    Host-kernel SSRF firewall runtime verification (Finding #5):
+    Checks if iptables rules for DOCKER-USER chain exist on the host kernel or reports a warning
+    if not running on a Linux host with kernel filtering enabled.
+    """
+    if os.name == "nt":
+        logger.info("[startup] Running on Windows host — skipping Linux kernel iptables verification.")
+        return
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "iptables", "-C", "DOCKER-USER", "-j", "RETURN", "-i", "docker0", "-o", "docker0",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            logger.warning(
+                "[startup-warning] DOCKER-USER iptables chain not verified! Host-kernel SSRF rules "
+                "(scripts/setup_host_firewall.sh) may not be installed or were wiped by a Docker daemon restart."
+            )
+        else:
+            logger.info("[startup] Host-kernel DOCKER-USER SSRF rules verified active.")
+    except Exception as e:
+        logger.warning("[startup-warning] Could not inspect iptables DOCKER-USER chain (%s). Ensure scripts/setup_host_firewall.sh has been run.", e)
+
+
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
     re.IGNORECASE,

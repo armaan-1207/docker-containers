@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "AEGIS Backend"
     DEBUG: bool = False
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+    REQUIRE_REAL_CERT: bool = False
 
     @property
     def is_production(self) -> bool:
@@ -274,6 +275,13 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Unconditional, secure-by-default guardrails (not environment-gated)
+
+if settings.ENVIRONMENT == "production" and not settings.REQUIRE_REAL_CERT:
+    raise RuntimeError(
+        "Production secure-by-default check: ENVIRONMENT is 'production' but REQUIRE_REAL_CERT is False. "
+        "Real TLS certificates must be enforced in production deployments to prevent MITM attacks."
+    )
+
 for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBOX_RUNNER_SECRET"):
     val = getattr(settings, secret_name, "")
     if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or val == "aegis-runner-internal-secret-token" or len(val) < 32:
