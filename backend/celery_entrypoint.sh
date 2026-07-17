@@ -24,8 +24,8 @@ try:
     r = redis.Redis.from_url(settings.REDIS_URL, socket_connect_timeout=3)
     r.ping()
     print('Redis is ready.')
-except Exception as e:
-    print(f'Not ready: {e}', file=sys.stderr)
+except Exception:
+    print('Redis not ready yet...', file=sys.stderr)
     sys.exit(1)
 "; do
     echo "[celery-entrypoint] Redis not ready, retrying in 2s..."
@@ -39,11 +39,36 @@ from config import settings
 try:
     psycopg2.connect(settings.DATABASE_URL.replace('+psycopg2', ''))
     print('PostgreSQL is ready.')
-except Exception as e:
-    print(f'Not ready: {e}', file=sys.stderr)
+except Exception:
+    print('PostgreSQL not ready yet...', file=sys.stderr)
     sys.exit(1)
 "; do
     echo "[celery-entrypoint] PostgreSQL not ready, retrying in 2s..."
+    sleep 2
+done
+
+echo "[celery-entrypoint] Waiting for ClamAV daemon..."
+until python -c "
+import socket, os, sys
+from config import settings
+host = os.environ.get('CLAMAV_HOST', getattr(settings, 'CLAMAV_HOST', 'localhost'))
+port = int(os.environ.get('CLAMAV_PORT', getattr(settings, 'CLAMAV_PORT', 3310)))
+try:
+    with socket.create_connection((host, port), timeout=3) as s:
+        s.sendall(b'zPING\0')
+        res = s.recv(128).decode('utf-8', errors='replace')
+        if 'PONG' in res:
+            print('ClamAV daemon is ready.')
+            sys.exit(0)
+    raise RuntimeError('zPING did not return PONG')
+except Exception:
+    if settings.DEBUG and not getattr(settings, 'CLAMAV_FAIL_CLOSED', False):
+        print('ClamAV not reachable in DEBUG mode with CLAMAV_FAIL_CLOSED=False (skipping).')
+        sys.exit(0)
+    print('ClamAV daemon not ready yet...', file=sys.stderr)
+    sys.exit(1)
+"; do
+    echo "[celery-entrypoint] ClamAV daemon not ready, retrying in 2s..."
     sleep 2
 done
 

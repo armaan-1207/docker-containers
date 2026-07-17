@@ -14,8 +14,8 @@ from config import settings
 try:
     psycopg2.connect(settings.DATABASE_URL.replace('+psycopg2', ''))
     print('PostgreSQL is ready.')
-except Exception as e:
-    print(f'Not ready: {e}', file=sys.stderr)
+except Exception:
+    print('PostgreSQL connection not ready yet...', file=sys.stderr)
     sys.exit(1)
 "; do
     echo "[entrypoint] PostgreSQL not ready yet, retrying in 2s..."

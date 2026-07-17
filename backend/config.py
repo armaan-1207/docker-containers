@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     ALLOW_LEGACY_BCRYPT: bool = True
+    CLAMAV_HOST: str = "clamav"
+    CLAMAV_PORT: int = 3310
     CLAMAV_FAIL_CLOSED: bool = True
 
     # -------------------------
@@ -216,9 +218,9 @@ class Settings(BaseSettings):
     # volume before the hourly file_cleanup task purges them (finding #8).
     ARTIFACT_RETENTION_DAYS: int = 14
 
-    SANDBOX_NETWORK: Optional[str] = None
+    SANDBOX_NETWORK: Optional[str] = "aegis_sandbox_net"
     SANDBOX_IMAGE: str = "aegis-sandbox:v1.0.0"
-    SHARED_SCANS_VOLUME: Optional[str] = None
+    SHARED_SCANS_VOLUME: Optional[str] = "aegis_shared_scans"
     SANDBOX_TIMEOUT_SEC: int = 120
 
     # -------------------------

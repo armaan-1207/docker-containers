@@ -821,6 +821,13 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
     scan_start_time = now_iso()
     mark(f"scan started for {url}")
 
+    if proxy is None and egress_proxy_port is None and not allow_private_targets:
+        logger.warning(
+            "[SSRF Guard Warning] scan_url invoked with neither 'proxy' nor 'egress_proxy_port' set. "
+            "Chromium will resolve DNS directly, leaving a DNS-rebinding (TOCTOU) gap between the upfront "
+            "is_target_allowed() check and navigation. Pass egress_proxy_port or proxy to guarantee protection."
+        )
+
     if not await is_target_allowed(url, allow_private_targets):
         mark("REFUSED: target resolves to a private/internal/reserved address")
         logger.error("Refusing to scan disallowed target: %s", url)

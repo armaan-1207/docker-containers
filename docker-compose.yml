@@ -250,6 +250,10 @@ services:
       --hostname=worker@%h
     environment:
       DOCKER_HOST: tcp://docker_socket_proxy:2375
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      SANDBOX_NETWORK: aegis_sandbox_net
+      SHARED_SCANS_VOLUME: aegis_shared_scans
     depends_on:
       postgres:
         condition: service_healthy
@@ -257,6 +261,8 @@ services:
         condition: service_healthy
       docker_socket_proxy:
         condition: service_started
+      clamav:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "celery -A celery_worker inspect ping --timeout 5 2>&1 | grep -c pong || exit 1"]
       interval: 45s
@@ -298,7 +304,41 @@ services:
       start_period: 30s
 
   # ---------------------------------------------------
-  # 8. SANDBOX — Playwright Detonation Container
+  # 8. CLAMAV — Anti-Malware Sidecar Daemon
+  # ---------------------------------------------------
+  clamav:
+    container_name: aegis_clamav
+    image: clamav/clamav:1.4.1
+    environment:
+      - CLAMAV_NO_FRESHCLAM=false
+    volumes:
+      - clamav_db:/var/lib/clamav
+    networks:
+      - aegis_net
+    expose:
+      - "3310"
+    healthcheck:
+      test: ["CMD-SHELL", "echo zPING | nc localhost 3310 | grep -q PONG || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2048M
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+
+  # ---------------------------------------------------
+  # 9. SANDBOX — Playwright Detonation Container
   # ---------------------------------------------------
   sandbox:
     container_name: aegis_sandbox
@@ -341,33 +381,34 @@ services:
 volumes:
   shared_scans:
     driver: local
+    name: aegis_shared_scans
   postgres_data:
     driver: local
+    name: aegis_postgres_data
   postgres_backups:
     driver: local
+    name: aegis_postgres_backups
   celery_beat_data:
     driver: local
+    name: aegis_celery_beat_data
+  clamav_db:
+    driver: local
+    name: aegis_clamav_db
 
 # -------------------------------------------------------
 # NETWORKS
 # -------------------------------------------------------
-# DEVSECOPS_TODO #4 fix: no `ipam.config.subnet` on any of these three.
-# None of them need a predictable, fixed address block — every reference
-# to another container in this file (and in code, e.g.
-# tasks/sandbox_analysis.py's SANDBOX_NETWORK) is by container/service
-# NAME via Docker's embedded DNS, never by literal IP. Letting Docker
-# auto-allocate from its free pool list is what actually fixes "pool
-# overlaps with other one on this address space" — pinning a *different*
-# hardcoded subnet just moves the collision to wherever the next thing
-# on this host happens to claim next.
 networks:
   aegis_net:
     driver: bridge
+    name: aegis_net
 
   docker_proxy_net:
     driver: bridge
     internal: true
+    name: aegis_docker_proxy_net
 
   sandbox_net:
     driver: bridge
     internal: false   # internet egress allowed for URL detonation
+    name: aegis_sandbox_net

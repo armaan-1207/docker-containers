@@ -1,4 +1,5 @@
 import urllib.request
+import urllib.parse
 import json
 import ssl
 import base64
@@ -12,10 +13,14 @@ import argparse
 parser = argparse.ArgumentParser(description="AEGIS E2E Integration Test Runner")
 parser.add_argument("--host", default=os.environ.get("AEGIS_HOST", "https://localhost"), help="Target API host")
 parser.add_argument("--email", default=os.environ.get("TEST_EMAIL", "analyst@test.com"), help="Test account email")
-parser.add_argument("--password", default=os.environ.get("TEST_PASSWORD", "TestPass123!@#"), help="Test account password")
+parser.add_argument("--password", default=os.environ.get("TEST_PASSWORD"), help="Test account password (required if TEST_PASSWORD env var not set)")
 parser.add_argument("--ca-bundle", default=os.environ.get("SSL_CERT_FILE"), help="Path to CA bundle for TLS verification")
 parser.add_argument("--insecure", action="store_true", default=False, help="Disable TLS certificate verification (only auto-enabled for localhost/127.0.0.1 targets)")
 args = parser.parse_known_args()[0]
+
+if not args.password:
+    print("FATAL: --password argument or TEST_PASSWORD environment variable is required.", file=sys.stderr)
+    sys.exit(1)
 
 ctx = ssl.create_default_context()
 if args.ca_bundle and os.path.exists(args.ca_bundle):

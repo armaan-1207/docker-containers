@@ -151,10 +151,14 @@ docker containers/
 
 ## Security Highlights
 
-- **Least Privilege Architecture:** All services (`nginx`, `backend`, `celery_worker`, `celery_beat`, `redis`, `sandbox`) run with `cap_drop: ALL` and `no-new-privileges: true`.
+- **Least Privilege Architecture:** All services (`nginx`, `backend`, `celery_worker`, `celery_beat`, `redis`, `clamav`, `sandbox`) run with `cap_drop: ALL` and `no-new-privileges: true`.
 - **Non-Root Execution:** Application services run under the dedicated non-root `aegis` user (UID 1001).
-- **Socket Isolation:** Celery workers do not have raw access to the Docker socket; they communicate strictly through a scoped, read-only `docker_socket_proxy` (`CONTAINERS=1`, `POST=1`, `VOLUMES=0`, `EXEC=0`).
-- **Malware Scanning:** Uploaded files and DOM snapshots are scanned locally via ClamAV inside the worker image before storage.
-- **Isolated Database Backups:** PostgreSQL backups (`pg_dump`) write to a dedicated `postgres_backups` volume, isolated from primary live database files.
+- **Socket Isolation:** Celery workers do not have raw access to the Docker socket; they communicate strictly through a scoped, read-only `docker_socket_proxy` (`CONTAINERS=1`, `POST=1`, `VOLUMES=0`, `EXEC=0`). For strict zero-trust multi-tenant setups, we recommend placing an admission-controlled gRPC job runner in front of the proxy.
+- **Malware Scanning:** Uploaded files and DOM snapshots are scanned via a dedicated ClamAV daemon (`clamav` sidecar) over TCP socket (`INSTREAM` protocol) with automatic signature updates. `CLAMAV_FAIL_CLOSED=True` is strictly enforced when `DEBUG=False`.
+- **Isolated Database Backups:** PostgreSQL backups (`pg_dump`) write to a dedicated `postgres_backups` volume (`aegis_postgres_backups`), isolated from primary live database files.
+- **Detonation Sandbox Isolation:** Chromium runs with `--no-sandbox` inside our non-root container (`read_only: true`, `cap_drop: ALL`, memory & PID limits). For high-security multi-tenant deployments processing hostile JavaScript, running `aegis_sandbox` inside microVM container runtimes (**gVisor** or **Kata Containers**) is recommended for kernel-level isolation.
 
-> **Before going live:** Change `SECRET_KEY` and database credentials in `.env` to strong, unique secrets, and configure your external threat intelligence API keys.
+> **Pre-Launch Checklist (Before going live):**
+> 1. Change `SECRET_KEY` and database credentials (`AEGIS_DB_PASSWORD`, `POSTGRES_ROOT_PASSWORD`, `REDIS_PASSWORD`) in `.env` to strong, unique secrets (`secrets.token_hex(32)`).
+> 2. Replace the baked-in self-signed Nginx certificate by volume-mounting real production TLS certificates (`/etc/nginx/ssl/aegis.crt` and `aegis.key`) so private keys are never shared across built images.
+> 3. Pin `SANDBOX_IMAGE` (`aegis-sandbox:v1.0.0@sha256:...`) and configure external threat intelligence API keys (`VIRUSTOTAL_API_KEY`, etc.).
