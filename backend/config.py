@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-this-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ALLOW_LEGACY_BCRYPT: bool = True
 
     # -------------------------
     # CORS (finding #16)
@@ -70,7 +71,7 @@ class Settings(BaseSettings):
     #   chrome-extension://abcdef123456,https://dashboard.example.com
     # -------------------------
     CORS_ALLOWED_ORIGINS: str = ""
-    ALLOWED_HOSTS: str = "localhost,127.0.0.1,backend,nginx,*"
+    ALLOWED_HOSTS: str = "localhost,127.0.0.1,backend,nginx"
 
     # -------------------------
     # Database
@@ -215,8 +216,8 @@ class Settings(BaseSettings):
     ARTIFACT_RETENTION_DAYS: int = 14
 
     SANDBOX_NETWORK: Optional[str] = None
-    SANDBOX_IMAGE: str = "aegis-sandbox:latest"
-    SHARED_SCANS_VOLUME: str = "dockercontainers_shared_scans"
+    SANDBOX_IMAGE: str = "aegis-sandbox:v1.0.0@sha256:45b23dee08af5e43a7fea6c4cf9c25ccf269ee113168c19722f87876677c5cb2"
+    SHARED_SCANS_VOLUME: Optional[str] = None
     SANDBOX_TIMEOUT_SEC: int = 120
 
     # -------------------------
@@ -257,3 +258,23 @@ if not settings.DEBUG:
                 f"{secret_name} is invalid, weak, or still holds a default placeholder value ('{val}') while DEBUG=False. "
                 f"Set a strong random secret (32+ characters) in backend/.env before running in production."
             )
+
+    hosts = [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
+    if not hosts or "*" in hosts:
+        raise RuntimeError(
+            "ALLOWED_HOSTS is empty or contains wildcard '*' while DEBUG=False. "
+            "Explicitly define allowed domain hostnames in ALLOWED_HOSTS for production."
+        )
+
+    origins = [o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
+    if not origins:
+        raise RuntimeError(
+            "CORS_ALLOWED_ORIGINS is not set while DEBUG=False. "
+            "Explicitly configure CORS_ALLOWED_ORIGINS with allowed origins before deploying."
+        )
+
+    if ":latest" in settings.SANDBOX_IMAGE or "@sha256:" not in settings.SANDBOX_IMAGE:
+        raise RuntimeError(
+            f"SANDBOX_IMAGE ('{settings.SANDBOX_IMAGE}') uses mutable tag or lacks @sha256 digest while DEBUG=False. "
+            "Pin SANDBOX_IMAGE by immutable digest before deploying."
+        )

@@ -32,6 +32,7 @@ from typing import Tuple
 
 from celery_worker import celery
 from config import settings
+from services.malware_scanner import scan_file_clamav
 from database.database import get_db_session
 from database.models import Scan
 
@@ -65,6 +66,17 @@ else:
         "Refusing to start worker or execute sandbox scans. "
         "Run `docker network ls` to find the exact bridge network name (e.g. dockercontainers_sandbox_net) "
         "and set SANDBOX_NETWORK explicitly."
+    )
+
+_SHARED_VOLUME_ENV = os.environ.get("SHARED_SCANS_VOLUME") or getattr(settings, "SHARED_SCANS_VOLUME", None)
+if _SHARED_VOLUME_ENV:
+    SHARED_VOLUME_NAME = _SHARED_VOLUME_ENV
+else:
+    raise RuntimeError(
+        "FATAL: SHARED_SCANS_VOLUME is not set in environment or backend/.env. "
+        "Refusing to start worker or execute sandbox scans. "
+        "Run `docker volume ls` to find the exact shared volume name (e.g. dockercontainers_shared_scans) "
+        "and set SHARED_SCANS_VOLUME explicitly."
     )
 
 
@@ -196,6 +208,23 @@ def _call_sandbox(scan_id: str) -> dict:
     asyncio.run(_run_sandbox_container(scan_id, target_url, timeout_sec))
     json_path, sandbox_result = _find_result_by_request_id(scan_id)
     sandbox_result["_source_json_path"] = json_path  # internal only, stripped before persisting
+
+    # Anti-malware check (ClamAV) on generated artifacts & downloads
+    is_clean, details = scan_file_clamav(json_path)
+    full_page_path = sandbox_result.get("screenshots", {}).get("fullpage_screenshot_path")
+    if full_page_path and os.path.exists(full_page_path):
+        clean_screenshot, scr_details = scan_file_clamav(full_page_path)
+        if not clean_screenshot:
+            is_clean = False
+            details += f" | Screenshot: {scr_details}"
+
+    sandbox_result["malware_scan"] = {
+        "is_clean": is_clean,
+        "details": details
+    }
+    if not is_clean:
+        logger.warning("[ClamAV Alert] Scan %s produced malicious artifact: %s", scan_id, details)
+
     return sandbox_result
 
 

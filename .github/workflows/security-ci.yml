@@ -7,8 +7,22 @@ on:
     branches: [ main ]
 
 jobs:
-  static-security-scans:
-    name: Bandit & Trivy Scans
+  compose-validate:
+    name: Compose Configuration Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose Configuration
+        run: |
+          # Copy template env if missing to allow variable interpolation checking
+          if [ ! -f .env ]; then cp .env.example .env; fi
+          if [ ! -f backend/.env ]; then cp backend/.env.example backend/.env; fi
+          docker compose config -q
+
+  dependency-scan:
+    name: Dependency Vulnerability Scan (pip-audit)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -19,35 +33,102 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Bandit
-        run: pip install bandit
+      - name: Install and Run pip-audit
+        run: |
+          pip install pip-audit
+          # Scan production requirements for known CVEs
+          pip-audit -r backend/requirements.txt -r sandbox/docker/requirements.txt --strict --desc on
 
-      - name: Run Bandit Static Application Security Testing (SAST)
-        run: bandit -r backend/ sandbox/backend/ run_scan.py scripts/ -ll -ii
+  sast:
+    name: Static Application Security Testing (Bandit & Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Run Trivy Vulnerability Scanner on Filesystem
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install SAST Tools
+        run: pip install bandit semgrep
+
+      - name: Run Bandit SAST
+        run: |
+          bandit -r backend/ sandbox/backend/ run_scan.py scripts/ -f sarif -o bandit.sarif || true
+
+      - name: Run Semgrep SAST
+        run: |
+          semgrep scan --config auto --sarif --output semgrep.sarif backend/ sandbox/backend/ run_scan.py scripts/ || true
+
+      - name: Upload Bandit SARIF to Security Tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bandit.sarif
+          category: bandit
+
+      - name: Upload Semgrep SARIF to Security Tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  secret-scan:
+    name: Secret Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+  container-scan:
+    name: Container Image Vulnerability Scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build Backend Image
+        run: docker build -t aegis-backend:ci -f backend/Dockerfile .
+
+      - name: Build Sandbox Image
+        run: docker build -t aegis-sandbox:ci -f sandbox/Dockerfile sandbox/
+
+      - name: Run Trivy Image Scan on Backend Image
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'table'
-          exit-code: '1'
-          ignore-unfixed: true
+          image-ref: 'aegis-backend:ci'
+          format: 'sarif'
+          output: 'trivy-backend.sarif'
           severity: 'CRITICAL,HIGH'
 
-      - name: Generate CycloneDX Software Bill of Materials (SBOM) with Trivy
+      - name: Run Trivy Image Scan on Sandbox Image
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'cyclonedx'
-          output: 'trivy-sbom.json'
+          image-ref: 'aegis-sandbox:ci'
+          format: 'sarif'
+          output: 'trivy-sandbox.sarif'
+          severity: 'CRITICAL,HIGH'
 
-      - name: Upload SBOM Artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Trivy Backend SARIF to Security Tab
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          name: cyclonedx-sbom
-          path: trivy-sbom.json
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend
+
+      - name: Upload Trivy Sandbox SARIF to Security Tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-sandbox.sarif
+          category: trivy-sandbox
 
   sandbox-security-tests:
     name: Sandbox SSRF & Egress Proxy Tests

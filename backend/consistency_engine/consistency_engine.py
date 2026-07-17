@@ -20,6 +20,7 @@ import logging
 from typing import Optional
 
 from PIL import Image
+Image.MAX_IMAGE_PIXELS = 25_000_000  # 5,000 x 5,000 px limit (~100MB max RGBA memory)
 
 try:
     import imagehash

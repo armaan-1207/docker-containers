@@ -40,6 +40,22 @@ postgresql+psycopg2://aegis_user:<SET_IN_ENV_AEGIS_DB_PASSWORD>@postgres:5432/ae
 ## Volumes
 - `postgres_data:/var/lib/postgresql/data` — persistent, survives container restarts
 
+## Backup & Retention Strategy
+To ensure disaster recovery (DR) preparedness without overflowing host disk space:
+
+### 1. Automated Daily Backups (`pg_dump`)
+Run daily logical backups using cron or Windows Task Scheduler executing inside the container:
+```powershell
+docker exec aegis_postgres pg_dump -U aegis_user -F c -b -v -f /var/lib/postgresql/data/aegis_db_$(date +%Y%m%d_%H%M%S).dump aegis_db
+```
+For production deployments requiring minimal RPO (Recovery Point Objective), enable Write-Ahead Log (WAL) archiving (`archive_mode = on` / `pg_waldump`) with `pg_basebackup` for Point-In-Time Recovery (PITR).
+
+### 2. Retention Policy
+- **Daily Backups:** Retain for **7 days** locally or in encrypted cloud object storage (AWS S3 / GCP Cloud Storage with lifecycle policies).
+- **Weekly Snapshots:** Retain 1 snapshot per week for **4 weeks**.
+- **Monthly Snapshots:** Retain 1 snapshot per month for **1 year** (compliance audit requirements).
+- **Scan Artifact Retention (`file_cleanup` task):** Shared volume scan files (`/shared/scans/<scan_id>/`) are automatically purged by Celery Beat's `tasks.file_cleanup` job after **30 days** by default (`RETENTION_DAYS=30`), preventing disk exhaustion while preserving database records (`scans` and `incidents` tables).
+
 ## Useful commands
 ```powershell
 # Connect to postgres shell
@@ -51,6 +67,9 @@ docker exec -it aegis_postgres psql -U aegis_user -d aegis_db
 # Check scan status counts
 SELECT status, count(*) FROM scans GROUP BY status;
 
-# Dump database
+# Dump database (SQL format)
 docker exec aegis_postgres pg_dump -U aegis_user aegis_db > backup.sql
+
+# Restore database from dump
+docker exec -i aegis_postgres pg_restore -U aegis_user -d aegis_db -v -c < backup.dump
 ```

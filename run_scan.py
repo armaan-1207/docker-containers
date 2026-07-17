@@ -5,10 +5,25 @@ import base64
 import time
 import subprocess
 import sys
+import os
+import uuid
+import argparse
+
+parser = argparse.ArgumentParser(description="AEGIS E2E Integration Test Runner")
+parser.add_argument("--host", default=os.environ.get("AEGIS_HOST", "https://localhost"), help="Target API host")
+parser.add_argument("--email", default=os.environ.get("TEST_EMAIL", "analyst@test.com"), help="Test account email")
+parser.add_argument("--password", default=os.environ.get("TEST_PASSWORD", "TestPass123!@#"), help="Test account password")
+parser.add_argument("--ca-bundle", default=os.environ.get("SSL_CERT_FILE"), help="Path to CA bundle for TLS verification")
+parser.add_argument("--insecure", action="store_true", default=True, help="Disable TLS certificate verification (default True for dev/self-signed)")
+args = parser.parse_known_args()[0]
 
 ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE
+if args.ca_bundle and os.path.exists(args.ca_bundle):
+    ctx.load_verify_locations(args.ca_bundle)
+elif args.insecure or "localhost" in args.host or "127.0.0.1" in args.host:
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    print("[WARNING] TLS verification disabled (--insecure or localhost target). Do not use across untrusted networks.")
 
 # 1x1 transparent PNG base64
 valid_png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
@@ -22,8 +37,9 @@ print("                      AEGIS PIPELINE SCANNER                           ")
 print("=======================================================================")
 
 # 1. Automatically register user if missing (returns 202 Accepted)
-print("\n[1] Ensuring user account exists...")
-reg_req = urllib.request.Request('https://localhost/api/auth/register', data=json.dumps({'email': 'analyst@test.com', 'password': 'TestPass123!@#'}).encode(), headers={'Content-Type': 'application/json'}, method='POST')
+print(f"\n[1] Ensuring user account ({args.email}) exists on {args.host}...")
+reg_payload = json.dumps({'email': args.email, 'password': args.password}).encode()
+reg_req = urllib.request.Request(f'{args.host.rstrip("/")}/api/auth/register', data=reg_payload, headers={'Content-Type': 'application/json'}, method='POST')
 try:
     urllib.request.urlopen(reg_req, context=ctx)  # nosec B310
     print("    -> User ensured/created.")
@@ -32,8 +48,8 @@ except Exception:
 
 # 2. Login to get JWT Token
 print("\n[2] Authenticating with Nginx ingress (POST /api/auth/login)...")
-login_data = 'username=analyst@test.com&password=TestPass123!@#'.encode()
-req = urllib.request.Request('https://localhost/api/auth/login', data=login_data, headers={'Content-Type': 'application/x-www-form-urlencoded'}, method='POST')
+login_data = f'username={urllib.parse.quote(args.email)}&password={urllib.parse.quote(args.password)}'.encode()
+req = urllib.request.Request(f'{args.host.rstrip("/")}/api/auth/login', data=login_data, headers={'Content-Type': 'application/x-www-form-urlencoded'}, method='POST')
 try:
     auth_resp = urllib.request.urlopen(req, context=ctx)  # nosec B310
     token = json.loads(auth_resp.read().decode())['access_token']
@@ -52,7 +68,7 @@ stage2_payload = json.dumps({
     'html': html_payload
 }).encode()
 
-req_scan = urllib.request.Request('https://localhost/api/scans/stage2', data=stage2_payload, headers={
+req_scan = urllib.request.Request(f'{args.host.rstrip("/")}/api/scans/stage2', data=stage2_payload, headers={
     'Authorization': f'Bearer {token}',
     'Content-Type': 'application/json'
 }, method='POST')
@@ -60,7 +76,7 @@ req_scan = urllib.request.Request('https://localhost/api/scans/stage2', data=sta
 try:
     scan_resp = urllib.request.urlopen(req_scan, context=ctx)  # nosec B310
     scan_res = json.loads(scan_resp.read().decode())
-    scan_id = scan_res['scan_id']
+    scan_id = str(uuid.UUID(scan_res['scan_id']))  # Validate server UUID
     job_id = scan_res['job_id']
     print(f"    -> SUCCESS: Scan queued instantly!")
     print(f"       Scan ID : {scan_id}")
@@ -74,7 +90,12 @@ except Exception as e:
 print(f"\n[4] Tracking progression of stages across Celery workers...")
 start_time = time.time()
 for _ in range(18):
-    status_query = ["docker", "exec", "-u", "postgres", "aegis_postgres", "psql", "-d", "aegis_db", "-t", "-c", f"SELECT status, risk_score, severity FROM scans WHERE id = '{scan_id}';"]
+    # Medium #8 fix: Use psql variable parameterization (-v scan_id=...) instead of raw string interpolation
+    status_query = [
+        "docker", "exec", "-u", "postgres", "aegis_postgres",
+        "psql", "-d", "aegis_db", "-v", f"scan_id={scan_id}", "-t",
+        "-c", "SELECT status, risk_score, severity FROM scans WHERE id = :scan_id;"
+    ]
     row = run_cmd(status_query).strip()
     parts = [p.strip() for p in row.split('|')] if '|' in row else [row]
     current_status = parts[0] if parts else "unknown"

@@ -63,6 +63,11 @@ _allowed_origins: list[str] = [
     o.strip() for o in _raw_origins.split(",") if o.strip()
 ]
 if not _allowed_origins:
+    if not settings.DEBUG:
+        raise RuntimeError(
+            "CORS_ALLOWED_ORIGINS must be explicitly set when DEBUG=False. "
+            "Configure CORS_ALLOWED_ORIGINS with allowed origins before deploying."
+        )
     # Safe default for dev: allow localhost only
     _allowed_origins = [
         "http://localhost",
@@ -80,8 +85,14 @@ _raw_hosts = getattr(settings, "ALLOWED_HOSTS", "") or ""
 _allowed_hosts: list[str] = [
     h.strip() for h in _raw_hosts.split(",") if h.strip()
 ]
-if not _allowed_hosts:
-    _allowed_hosts = ["*"]
+if not _allowed_hosts or "*" in _allowed_hosts:
+    if not settings.DEBUG:
+        raise RuntimeError(
+            "ALLOWED_HOSTS is empty or contains wildcard '*' while DEBUG=False. "
+            "Explicitly define allowed domain hostnames in ALLOWED_HOSTS for production."
+        )
+    if not _allowed_hosts:
+        _allowed_hosts = ["*"]
 
 app.add_middleware(
     TrustedHostMiddleware,

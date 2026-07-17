@@ -14,7 +14,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from auth.jwt import create_access_token
-from auth.security import hash_password, verify_password
+from auth.security import hash_password, verify_password, verify_password_with_migration
 from database.database import get_db
 from database.models import User
 from schemas.auth import TokenResponse, UserRegisterRequest, UserRegisterAcceptedResponse
@@ -86,7 +86,7 @@ def login(
     Authenticate and return a JWT access token.
 
     Timing-attack mitigation (security finding #5):
-    verify_password() is called unconditionally.  When the user is not
+    verify_password_with_migration() is called unconditionally. When the user is not
     found we compare against _DUMMY_HASH, ensuring the bcrypt work-factor
     is always paid and response time does not leak whether the email exists.
     """
@@ -96,7 +96,7 @@ def login(
     # so the response time is identical regardless of whether the account
     # exists. The result of the comparison is only used when user is not None.
     password_hash_to_check = user.hashed_password if user is not None else _DUMMY_HASH
-    password_valid = verify_password(form_data.password, password_hash_to_check)
+    password_valid, needs_rehash = verify_password_with_migration(form_data.password, password_hash_to_check)
 
     invalid_credentials = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -106,6 +106,12 @@ def login(
 
     if user is None or not password_valid:
         raise invalid_credentials
+
+    # Automatic hash rotation: upgrade legacy hash to SHA-256 pre-hashed format on successful login
+    if needs_rehash:
+        user.hashed_password = hash_password(form_data.password)
+        db.commit()
+        logger.info("Automatically upgraded legacy password hash to SHA-256 pre-hash format for user: %s", user.email)
 
     if hasattr(user, "is_active") and not user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")

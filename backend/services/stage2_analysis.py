@@ -27,6 +27,9 @@ import uuid
 
 from PIL import Image, UnidentifiedImageError
 
+# High #4 fix: Cap total image pixels to prevent decompression bombs across Pillow decodes
+Image.MAX_IMAGE_PIXELS = 25_000_000  # 5,000 x 5,000 px limit (~100MB max RGBA memory)
+
 from database.models import Scan
 from config import settings
 from schemas.stage2 import Stage2Request, Stage2Response, JobStatus
@@ -57,20 +60,18 @@ def _validate_scan_id(scan_id: str) -> None:
         raise ValueError(f"scan_id '{scan_id}' is not a valid UUID — rejected to prevent path traversal")
 
 
-def _decode_and_validate_image(screenshot_base64: str) -> bytes:
+def _decode_and_validate_image(b64_string: str) -> bytes:
     """
-    Decode and validate the base64-encoded screenshot.
-
-    Steps:
-      1. Decode base64 → raw bytes (raises ValueError on malformed base64).
-      2. Enforce 5 MB size cap.
-      3. PIL structural verification — ensures the bytes are a parseable
-         image, not an arbitrary binary payload targeting downstream libs.
-
-    Returns the raw image bytes on success. Raises ValueError on any failure.
+    Validates base64 string, checks byte size, and performs Pillow structural
+    and dimensional verification. Returns raw image bytes on success.
+    Raises ValueError with a safe message on any error.
     """
     try:
-        image_bytes = base64.b64decode(screenshot_base64, validate=True)
+        # Strip data URI scheme if provided, e.g. "data:image/png;base64,..."
+        if "," in b64_string[:64]:
+            b64_string = b64_string.split(",", 1)[1]
+
+        image_bytes = base64.b64decode(b64_string, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError(f"screenshot_base64 is not valid base64: {exc}") from exc
 
@@ -80,13 +81,20 @@ def _decode_and_validate_image(screenshot_base64: str) -> bytes:
             f"(maximum {_MAX_IMAGE_BYTES} bytes / 5 MB)"
         )
 
-    # PIL structural verification — Image.verify() raises on corrupt or
-    # non-image data. We must re-open after verify() because verify()
-    # consumes the file pointer and leaves the object unusable for reading.
+    # PIL structural and dimensional verification — Image.verify() raises on corrupt or
+    # non-image data. Check dimensions explicitly to prevent decompression bombs.
     try:
         img = Image.open(io.BytesIO(image_bytes))
+        width, height = img.size
+        if width * height > Image.MAX_IMAGE_PIXELS:
+            raise ValueError(
+                f"Image dimensions ({width}x{height} = {width*height} px) exceed limit "
+                f"of {Image.MAX_IMAGE_PIXELS} pixels (decompression bomb protection)."
+            )
         img.verify()          # raises on corrupt / non-image data
     except (UnidentifiedImageError, Exception) as exc:
+        if isinstance(exc, ValueError) and "decompression bomb" in str(exc).lower():
+            raise
         raise ValueError(
             f"screenshot_base64 does not decode to a valid image: {exc}"
         ) from exc

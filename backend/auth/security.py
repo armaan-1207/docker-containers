@@ -6,6 +6,9 @@ auth/security.py
 import hashlib
 import bcrypt
 
+from typing import Tuple
+from config import settings
+
 _MAX_PASSWORD_BYTES = 72
 
 
@@ -20,14 +23,28 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(pw_bytes, bcrypt.gensalt()).decode("utf-8")
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password_with_migration(plain_password: str, hashed_password: str) -> Tuple[bool, bool]:
+    """
+    Returns (is_valid, needs_rehash).
+    needs_rehash is True when a legacy truncated-72-byte hash succeeded and
+    ALLOW_LEGACY_BCRYPT is enabled, indicating the password hash should be
+    upgraded to the new SHA-256 pre-hashed format immediately upon login.
+    """
     hashed_bytes = hashed_password.encode("utf-8")
     try:
         # First check SHA-256 pre-hashed password (new format)
         if bcrypt.checkpw(_pre_hash(plain_password), hashed_bytes):
-            return True
-        # Backward compatibility check for legacy passwords truncated at 72 bytes
-        legacy_bytes = plain_password.encode("utf-8")[:_MAX_PASSWORD_BYTES]
-        return bcrypt.checkpw(legacy_bytes, hashed_bytes)
+            return True, False
+        # Backward compatibility check only if explicitly enabled
+        if getattr(settings, "ALLOW_LEGACY_BCRYPT", True):
+            legacy_bytes = plain_password.encode("utf-8")[:_MAX_PASSWORD_BYTES]
+            if bcrypt.checkpw(legacy_bytes, hashed_bytes):
+                return True, True
+        return False, False
     except ValueError:
-        return False
+        return False, False
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    is_valid, _ = verify_password_with_migration(plain_password, hashed_password)
+    return is_valid
