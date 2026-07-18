@@ -86,10 +86,9 @@ class UserRegisterRequest(BaseModel):
                     f"Password is too easy to guess (entropy score {result.get('score', 0)}/4). Avoid dictionary words or common patterns."
                 )
         except ImportError:
-            import logging
-            logging.getLogger(__name__).warning(
-                "zxcvbn is not installed! Password entropy checks are bypassed. "
-                "This is a silent security control regression. Please install zxcvbn."
+            raise ImportError(
+                "zxcvbn is not installed! Password entropy checks cannot be enforced. "
+                "Failing closed to prevent insecure registrations."
             )
 
         return v

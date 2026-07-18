@@ -79,12 +79,17 @@ switch ($Command) {
         Write-Header "Verifying Image Signatures"
         # Verify local images built/pulled during CI
         Write-Host "Verifying aegis-sandbox:ci..."
-        cosign verify --key cosign.pub aegis-sandbox:ci || Write-Host "[WARN] Signature mismatch or missing for aegis-sandbox:ci" -ForegroundColor Yellow
+        cosign verify --key cosign.pub aegis-sandbox:ci || { Write-Host "[FATAL] Signature mismatch or missing for aegis-sandbox:ci" -ForegroundColor Red; exit 1 }
         Write-Host "Verifying aegis-worker:ci..."
-        cosign verify --key cosign.pub aegis-worker:ci || Write-Host "[WARN] Signature mismatch or missing for aegis-worker:ci" -ForegroundColor Yellow
+        cosign verify --key cosign.pub aegis-worker:ci || { Write-Host "[FATAL] Signature mismatch or missing for aegis-worker:ci" -ForegroundColor Red; exit 1 }
     }
 
     "sandbox" {
+        if ($env:ENVIRONMENT -eq "production" -and $env:ALLOW_DEBUG_PROFILE -ne "true") {
+            Write-Host "[FATAL] The debug sandbox profile shares the full scan volume and is disabled in production." -ForegroundColor Red
+            Write-Host "To override, set ALLOW_DEBUG_PROFILE=true." -ForegroundColor Yellow
+            exit 1
+        }
         if ($Arg1 -eq "") {
             Write-Host "[ERROR] Provide a URL: .\aegis.ps1 sandbox https://example.com" -ForegroundColor Red
             exit 1

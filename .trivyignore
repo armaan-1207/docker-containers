@@ -1,0 +1,7 @@
+# AEGIS Trivy Vulnerability Waivers
+# 
+# This file tracks known CVEs that have been explicitly accepted.
+# Do NOT blanket ignore CVEs without justification.
+# Format:
+# CVE-YYYY-NNNNN
+# # Justification: [Reason] (Date)

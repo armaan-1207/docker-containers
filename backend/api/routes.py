@@ -39,21 +39,13 @@ def _sanitize_html_content(html: str) -> str:
     Strips active script execution elements, event handler attributes, and dangerous URI schemes.
     """
     try:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup.find_all(["script", "iframe", "object", "embed", "applet", "base", "link"]):
-            tag.decompose()
-        for tag in soup.find_all(True):
-            for attr in list(tag.attrs.keys()):
-                if attr.lower().startswith("on"):
-                    del tag.attrs[attr]
-                elif attr.lower() in ("href", "src", "action", "formaction"):
-                    val = str(tag.attrs[attr]).strip().lower()
-                    if val.startswith("javascript:") or val.startswith("vbscript:") or val.startswith("data:text/html"):
-                        del tag.attrs[attr]
-        return str(soup)
+        import nh3
+        return nh3.clean(html)
+    except ImportError:
+        logger.warning("nh3 not installed! Falling back to stripping text.")
+        return html.replace("<", "&lt;").replace(">", "&gt;")
     except Exception as e:
-        logger.warning("BS4 HTML sanitization error: %s, returning stripped text", e)
+        logger.warning("HTML sanitization error: %s, returning stripped text", e)
         return html.replace("<", "&lt;").replace(">", "&gt;")
 
 

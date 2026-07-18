@@ -16,6 +16,7 @@ Used by:
 """
 
 import asyncio
+import collections
 import ipaddress
 import logging
 import socket
@@ -29,7 +30,7 @@ _DNS_CACHE_TTL_SECONDS = 300  # 5 minutes — successful resolutions
 _DNS_FAILURE_TTL_SECONDS = 10  # failed resolutions — short, so a transient
                                 # DNS blip doesn't block a legit target for
                                 # anywhere close to the full 5 minutes
-_dns_cache = {}  # hostname -> (ips: list[str], expiry: float monotonic time)
+_dns_cache = collections.OrderedDict()  # hostname -> (ips: list[str], expiry: float monotonic time)
 _dns_cache_lock = asyncio.Lock()
 
 
@@ -38,6 +39,8 @@ async def _resolve_all_ips(hostname):
     async with _dns_cache_lock:
         cached = _dns_cache.get(hostname)
         if cached and cached[1] > now:
+            # Move to end to mark as recently used
+            _dns_cache.move_to_end(hostname)
             return cached[0]
 
     loop = asyncio.get_running_loop()
@@ -50,8 +53,10 @@ async def _resolve_all_ips(hostname):
 
     async with _dns_cache_lock:
         ttl = _DNS_CACHE_TTL_SECONDS if ips else _DNS_FAILURE_TTL_SECONDS
-        if len(_dns_cache) >= _DNS_CACHE_MAX_ENTRIES and hostname not in _dns_cache:
-            _dns_cache.pop(next(iter(_dns_cache)))
+        if hostname in _dns_cache:
+            del _dns_cache[hostname]
+        elif len(_dns_cache) >= _DNS_CACHE_MAX_ENTRIES:
+            _dns_cache.popitem(last=False)
         _dns_cache[hostname] = (ips, time.monotonic() + ttl)
     return ips
 
@@ -60,6 +65,7 @@ _EXPLICIT_BLOCKED_NETWORKS = [
     ipaddress.ip_network("100.64.0.0/10"),   # CGNAT shared address space
     ipaddress.ip_network("192.0.0.0/24"),    # IETF protocol assignments
     ipaddress.ip_network("::/96"),           # IPv4-compatible IPv6 (deprecated, still routable oddly)
+    ipaddress.ip_network("64:ff9b::/96"),    # NAT64
 ]
 
 

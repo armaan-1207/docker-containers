@@ -211,10 +211,11 @@ services:
     environment:
       CONTAINERS: 1
       POST: 1
-      # AUTH: 0 — relies on strict network isolation (docker_proxy_net being internal: true with only aegis_sandbox_runner attached).
+      # AUTH: 1 — Basic Authentication enforced (defense in depth).
       # WARNING: Treat any future addition to docker_proxy_net as a critical security review item.
       # Exposing this proxy to unauthenticated services allows full host takeover.
-      AUTH: 0
+      AUTH: 1
+      BASIC_AUTH_INFO: ${PROXY_BASIC_AUTH:?PROXY_BASIC_AUTH must be set in .env}
       BUILD: 0
       COMMIT: 0
       CONFIGS: 0
@@ -262,6 +263,7 @@ services:
       SHARED_SCANS_VOLUME: aegis_shared_scans
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9}
       SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:?SANDBOX_RUNNER_SECRET must be set in .env}
+      PROXY_BASIC_AUTH: ${PROXY_BASIC_AUTH:?PROXY_BASIC_AUTH must be set in .env}
       MAX_CONCURRENT_DETONATIONS: "10"
     networks:
       - aegis_net          # celery_worker communicates here via RPC

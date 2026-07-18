@@ -34,7 +34,7 @@ pydantic-settings==2.3.4
 
 # --- AI / ML ---
 lightgbm==4.4.0
-numpy==1.26.4
+numpy==2.4.6
 scikit-learn==1.5.1
 joblib==1.4.2
 
@@ -54,6 +54,7 @@ tldextract==5.1.2
 # --- HTML Parsing (DOM feature extraction) ---
 beautifulsoup4==4.12.3
 lxml==5.2.2
+nh3==0.2.17
 
 # --- Utilities ---
 python-dotenv==1.0.1
