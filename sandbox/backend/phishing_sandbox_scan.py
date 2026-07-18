@@ -894,55 +894,65 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
         if storage_state:
             context_kwargs["storage_state"] = storage_state
             mark("using handed-off session state from an earlier pipeline stage")
-        context = await browser.new_context(**context_kwargs)
+
         try:
-            await _STEALTH.apply_stealth_async(context)
-            await context.add_init_script(INIT_SCRIPT)
+            context = await browser.new_context(**context_kwargs)
+            background_tasks = set()
+            try:
+                await _STEALTH.apply_stealth_async(context)
+                await context.add_init_script(INIT_SCRIPT)
 
-            # SSRF guard, defense-in-depth: every request this context makes
-            # (redirects, subresources, iframes — not just the initial nav)
-            # gets the same private/internal-address check.
-            async def _ssrf_guard_route(route):
-                target = route.request.url
-                if await is_target_allowed(target, allow_private_targets):
-                    await route.continue_()
-                else:
-                    blocked_requests.append(target)
-                    logger.warning("SSRF guard blocked request to %s", target)
-                    await route.abort()
+                # SSRF guard, defense-in-depth: every request this context makes
+                # (redirects, subresources, iframes — not just the initial nav)
+                # gets the same private/internal-address check.
+                async def _ssrf_guard_route(route):
+                    target = route.request.url
+                    if await is_target_allowed(target, allow_private_targets):
+                        await route.continue_()
+                    else:
+                        blocked_requests.append(target)
+                        logger.warning("SSRF guard blocked request to %s", target)
+                        await route.abort()
 
-            await context.route("**/*", _ssrf_guard_route)
+                await context.route("**/*", _ssrf_guard_route)
 
-            page = await context.new_page()
+                page = await context.new_page()
 
-            cdp = await context.new_cdp_session(page)
-            await cdp.send("Page.enable")
-            cdp.on("Page.windowOpen", lambda evt: window_open_events.append(evt))
+                cdp = await context.new_cdp_session(page)
+                await cdp.send("Page.enable")
+                cdp.on("Page.windowOpen", lambda evt: window_open_events.append(evt))
 
-            def on_new_page(pg):
-                asyncio.create_task(close_quietly(pg))
+                def on_new_page(pg):
+                    t = asyncio.create_task(close_quietly(pg))
+                    background_tasks.add(t)
+                    t.add_done_callback(background_tasks.discard)
 
-            context.on("page", on_new_page)
+                context.on("page", on_new_page)
 
-            def on_request(req):
-                network_events.append({"type": "request", "url": req.url,
-                                        "resource_type": req.resource_type})
+                def on_request(req):
+                    network_events.append({"type": "request", "url": req.url,
+                                            "resource_type": req.resource_type})
 
-            async def on_response(resp):
-                try:
-                    headers = await resp.all_headers()
-                except Exception:
-                    headers = {}
-                network_events.append({
-                    "type": "response", "url": resp.url, "status": resp.status,
-                    "headers": headers,
-                })
+                async def on_response(resp):
+                    try:
+                        headers = await resp.all_headers()
+                    except Exception:
+                        headers = {}
+                    network_events.append({
+                        "type": "response", "url": resp.url, "status": resp.status,
+                        "headers": headers,
+                    })
 
-            ws_count = {"n": 0}
-            page.on("request", on_request)
-            page.on("response", lambda r: asyncio.create_task(on_response(r)))
-            page.on("websocket", lambda ws: ws_count.__setitem__("n", ws_count["n"] + 1))
-            page.on("download", lambda d: downloads.append(d))
+                def _spawn_on_response(r):
+                    t = asyncio.create_task(on_response(r))
+                    background_tasks.add(t)
+                    t.add_done_callback(background_tasks.discard)
+
+                ws_count = {"n": 0}
+                page.on("request", on_request)
+                page.on("response", _spawn_on_response)
+                page.on("websocket", lambda ws: ws_count.__setitem__("n", ws_count["n"] + 1))
+                page.on("download", lambda d: downloads.append(d))
 
             main_response = None
             load_error = None
@@ -1140,10 +1150,14 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
 
             brand_match = None
             if _BRAND_MATCHER is not None and full_path and main_response is not None:
-                brand_match = _BRAND_MATCHER.match(full_path)
-                if brand_match:
-                    mark(f"brand-impersonation match: {brand_match['brand']} "
-                         f"(similarity {brand_match['similarity']})")
+                try:
+                    brand_match = _BRAND_MATCHER.match(full_path)
+                    if brand_match:
+                        mark(f"brand-impersonation match: {brand_match['brand']} "
+                             f"(similarity {brand_match['similarity']})")
+                except Exception as e:
+                    logger.warning("Brand matching failed during scan of %s: %s", full_path, e)
+                    brand_match = None
             elif _BRAND_MATCHER is not None and full_path and main_response is None:
                 mark("brand-impersonation check skipped -- screenshot is from a "
                      "partial/failed navigation (chrome-error page), not real content")
@@ -1258,26 +1272,22 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
                     mark(f"cloaking check failed: {e}")
                     logger.warning("Cloaking check failed: %s", e, exc_info=True)
 
+            finally:
+                if background_tasks:
+                    for t in background_tasks:
+                        if not t.done():
+                            t.cancel()
+                    await asyncio.gather(*background_tasks, return_exceptions=True)
+                try:
+                    await context.close()
+                except Exception as e:
+                    logger.debug("context.close() failed (non-fatal): %s", e)
         finally:
-            # In pool mode (owns_browser=False), the context this scan
-            # created was never closed before -- only the owned-browser path
-            # closed it (implicitly, via browser.close()). Every pooled scan
-            # was leaking its context, and the connections it opened, for
-            # the lifetime of the shared browser. Found via testing: a local
-            # proxy's wait_closed() hung waiting for a connection that
-            # belonged to exactly this leaked context. Moved into a real
-            # finally: block wrapping the WHOLE scan body above (not just
-            # placed after it) -- confirmed via audit that any uncaught
-            # exception ANYWHERE in that ~340-line body would previously
-            # skip this close() entirely, since it sat at the same level as
-            # ordinary sequential code with no outer guarantee.
-            try:
-                await context.close()
-            except Exception as e:
-                logger.debug("context.close() failed (non-fatal): %s", e)
-
-        if owns_browser:
-            await browser.close()
+            if owns_browser and browser is not None:
+                try:
+                    await browser.close()
+                except Exception as e:
+                    logger.debug("browser.close() failed (non-fatal): %s", e)
         mark("scan finished")
 
     result = {
@@ -1571,7 +1581,7 @@ def _atomic_write_json(path, data):
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2, default=str)
-        os.rename(tmp_path, path)
+        os.replace(tmp_path, path)
         try:
             os.chmod(path, 0o664)  # nosec B103
         except OSError:

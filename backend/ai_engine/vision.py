@@ -24,6 +24,8 @@ class BrandMatcher:
         self._reference = {}
         for brand, hex_str in reference_hashes.items():
             try:
+                if not isinstance(hex_str, str) or not hex_str.strip():
+                    continue
                 self._reference[brand] = imagehash.hex_to_hash(hex_str)
             except Exception as e:
                 logger.warning("Skipping malformed hash for brand %s: %s", brand, e)
@@ -34,8 +36,16 @@ class BrandMatcher:
         if not path.exists():
             logger.info("No brand reference set at %s — brand-impersonation check skipped.", path)
             return cls({})
-        with open(path) as f:
-            return cls(json.load(f))
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                logger.warning("Brand reference set at %s is not a JSON dict", path)
+                return cls({})
+            return cls(data)
+        except Exception as e:
+            logger.warning("Failed to load brand reference set from %s: %s", path, e)
+            return cls({})
 
     def match(self, screenshot_path, threshold=DEFAULT_SIMILARITY_THRESHOLD):
         if not self._reference or not screenshot_path:
@@ -48,11 +58,19 @@ class BrandMatcher:
 
         best_brand, best_similarity = None, 0.0
         for brand, ref_hash in self._reference.items():
-            distance = target_hash - ref_hash
-            hash_bits = len(ref_hash)
-            similarity = 1 - (distance / hash_bits)
-            if similarity > best_similarity:
-                best_brand, best_similarity = brand, similarity
+            try:
+                distance = target_hash - ref_hash
+                hash_bits = len(ref_hash)
+                if not hash_bits or hash_bits <= 0:
+                    continue
+                similarity = 1.0 - (distance / hash_bits)
+                similarity = max(0.0, min(1.0, float(similarity)))
+                if similarity > best_similarity:
+                    best_brand, best_similarity = brand, similarity
+            except (TypeError, ValueError) as e:
+                logger.warning("Skipping incompatible hash comparison for brand %s: %s", brand, e)
+            except Exception as e:
+                logger.warning("Unexpected error matching brand %s: %s", brand, e)
 
         if best_brand and best_similarity >= threshold:
             logger.debug("Brand match: %s at similarity %.3f", best_brand, best_similarity)
@@ -65,7 +83,11 @@ _REFERENCE_PATH = os.environ.get(
     "BRAND_REFERENCE_JSON", 
     os.path.join(os.path.dirname(__file__), "../../sandbox/backend/reference_hashes.json")
 )
-_matcher = BrandMatcher.from_file(_REFERENCE_PATH)
+try:
+    _matcher = BrandMatcher.from_file(_REFERENCE_PATH)
+except Exception as e:
+    logger.warning("Failed to initialize BrandMatcher from %s: %s", _REFERENCE_PATH, e)
+    _matcher = BrandMatcher({})
 
 def analyze_screenshot(image_path: str) -> dict:
     """
@@ -77,7 +99,11 @@ def analyze_screenshot(image_path: str) -> dict:
         logger.warning("analyze_screenshot called on missing file: %s", image_path)
         return {"logo": None, "labels": []}
         
-    logo_match = _matcher.match(image_path)
+    try:
+        logo_match = _matcher.match(image_path)
+    except Exception as e:
+        logger.warning("Brand matching failed during analyze_screenshot(%s): %s", image_path, e)
+        logo_match = None
     
     return {
         "logo": logo_match,

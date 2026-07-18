@@ -37,7 +37,10 @@ class BrandMatcher:
         self._reference = {}
         for brand, hex_str in reference_hashes.items():
             try:
-                self._reference[brand] = imagehash.hex_to_hash(hex_str)
+                if not isinstance(hex_str, str) or not hex_str.strip():
+                    continue
+                h = imagehash.hex_to_hash(hex_str)
+                self._reference[brand] = h
             except Exception as e:
                 logger.warning("Skipping malformed hash for brand %s: %s", brand, e)
 
@@ -48,8 +51,16 @@ class BrandMatcher:
             logger.info("No brand reference set at %s — brand-impersonation "
                         "check will be skipped for this scan.", path)
             return cls({})
-        with open(path) as f:
-            return cls(json.load(f))
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                logger.warning("Brand reference set at %s is not a JSON dict", path)
+                return cls({})
+            return cls(data)
+        except Exception as e:
+            logger.warning("Failed to load brand reference set from %s: %s", path, e)
+            return cls({})
 
     def match(self, screenshot_path, threshold=DEFAULT_SIMILARITY_THRESHOLD):
         if not self._reference or not screenshot_path:
@@ -62,11 +73,19 @@ class BrandMatcher:
 
         best_brand, best_similarity = None, 0.0
         for brand, ref_hash in self._reference.items():
-            distance = target_hash - ref_hash  # Hamming distance
-            hash_bits = len(ref_hash)
-            similarity = 1 - (distance / hash_bits)
-            if similarity > best_similarity:
-                best_brand, best_similarity = brand, similarity
+            try:
+                distance = target_hash - ref_hash  # Hamming distance
+                hash_bits = len(ref_hash)
+                if not hash_bits or hash_bits <= 0:
+                    continue
+                similarity = 1.0 - (distance / hash_bits)
+                similarity = max(0.0, min(1.0, float(similarity)))
+                if similarity > best_similarity:
+                    best_brand, best_similarity = brand, similarity
+            except (TypeError, ValueError) as e:
+                logger.warning("Skipping incompatible hash comparison for brand %s: %s", brand, e)
+            except Exception as e:
+                logger.warning("Unexpected error matching brand %s: %s", brand, e)
 
         if best_brand:
             logger.debug("Best candidate brand match: %s at similarity %.3f", best_brand, best_similarity)
