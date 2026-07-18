@@ -286,10 +286,10 @@ settings = Settings()
 
 # Unconditional, secure-by-default guardrails (not environment-gated)
 
-if settings.ENVIRONMENT == "production" and not settings.REQUIRE_REAL_CERT:
+if settings.is_production and not settings.REQUIRE_REAL_CERT:
     raise RuntimeError(
-        "Production secure-by-default check: ENVIRONMENT is 'production' but REQUIRE_REAL_CERT is False. "
-        "Real TLS certificates must be enforced in production deployments to prevent MITM attacks."
+        f"Production secure-by-default check: ENVIRONMENT is '{settings.ENVIRONMENT}' (treated as production) but REQUIRE_REAL_CERT is False. "
+        "Real TLS certificates must be enforced in production/staging deployments to prevent MITM attacks."
     )
 
 for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBOX_RUNNER_SECRET"):
@@ -302,17 +302,17 @@ for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBO
 
 hosts = [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
 if not hosts or "*" in hosts:
-    if settings.ENVIRONMENT == "production":
+    if settings.is_production:
         raise RuntimeError(
-            "Secure-by-default check: ALLOWED_HOSTS is empty or contains wildcard '*'. "
+            f"Secure-by-default check: ALLOWED_HOSTS is empty or contains wildcard '*' in '{settings.ENVIRONMENT}'. "
             "Explicitly define allowed domain hostnames in ALLOWED_HOSTS."
         )
 
 origins = [o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
 if not origins:
-    if settings.ENVIRONMENT == "production":
+    if settings.is_production:
         raise RuntimeError(
-            "Secure-by-default check: CORS_ALLOWED_ORIGINS is not set. "
+            f"Secure-by-default check: CORS_ALLOWED_ORIGINS is not set in '{settings.ENVIRONMENT}'. "
             "Explicitly configure CORS_ALLOWED_ORIGINS with allowed origins before running."
         )
 
@@ -322,8 +322,8 @@ if ":latest" in settings.SANDBOX_IMAGE or "@sha256:" not in settings.SANDBOX_IMA
         "Pin SANDBOX_IMAGE by immutable digest before running."
     )
 
-if not settings.CLAMAV_FAIL_CLOSED and settings.ENVIRONMENT == "production":
+if not settings.CLAMAV_FAIL_CLOSED and settings.is_production:
     raise RuntimeError(
-        "Secure-by-default check: CLAMAV_FAIL_CLOSED is False in production. "
+        f"Secure-by-default check: CLAMAV_FAIL_CLOSED is False in '{settings.ENVIRONMENT}'. "
         "Anti-malware scanning must be set to fail-closed to prevent un-scanned artifact ingestion."
     )

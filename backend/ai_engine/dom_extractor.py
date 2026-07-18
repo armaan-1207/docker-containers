@@ -21,7 +21,7 @@ def extract_features(html_path: str, final_url: str = "") -> dict:
 
     if not _HAS_BS4:
         logger.warning("beautifulsoup4 not installed - dom_extractor returning empty features")
-        return {"title": "", "forms": 0, "inputs": 0, "links": [], "scripts": 0, "final_url": final_url}
+        return {"title": "", "forms": 0, "form_actions": [], "inputs": 0, "links": [], "scripts": 0, "final_url": final_url}
 
     with open(html_path, encoding="utf-8", errors="ignore") as f:
         soup = BeautifulSoup(f.read(), "html.parser")

@@ -81,7 +81,7 @@ jobs:
 
       - name: Run Dependency Vulnerability Audit (pip-audit)
         run: |
-          pip-audit -r backend/requirements.txt -r sandbox/docker/requirements.txt --strict --desc on
+          pip-audit -r backend/requirements.txt -r backend/requirements.runner.txt -r sandbox/docker/requirements.txt --strict --desc on
 
       - name: Check SANDBOX_IMAGE Digest Synchronization Across Files
         run: |

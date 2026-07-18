@@ -37,7 +37,8 @@ _CACHE_TTL_SECONDS = 300
 
 
 def _domain_from_url(url: str) -> str:
-    return urlparse(url).netloc or url
+    netloc = urlparse(url).netloc or url
+    return netloc.split(":")[0].lower()
 
 
 def _cache_key(domain: str) -> str:

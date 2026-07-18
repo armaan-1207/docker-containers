@@ -239,11 +239,12 @@ services:
     environment:
       CONTAINERS: 1
       POST: 1
-      # AUTH: 1 — Basic Authentication enforced (defense in depth).
-      # WARNING: Treat any future addition to docker_proxy_net as a critical security review item.
-      # Exposing this proxy to unauthenticated services allows full host takeover.
-      AUTH: 1
-      BASIC_AUTH_INFO: ${PROXY_BASIC_AUTH:?PROXY_BASIC_AUTH must be set in .env}
+      # AUTH: 0 — Disables Docker /auth endpoint.
+      # WARNING: Tecnativa/docker-socket-proxy is an ACL gateway filtering by API endpoint.
+      # It does NOT natively enforce HTTP Basic Auth (BASIC_AUTH_INFO is unsupported).
+      # Security relies entirely on network isolation inside docker_proxy_net and endpoint ACLs below.
+      # Treat any addition of containers to docker_proxy_net as a critical security review item.
+      AUTH: 0
       BUILD: 0
       COMMIT: 0
       CONFIGS: 0
