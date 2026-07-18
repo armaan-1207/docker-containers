@@ -73,10 +73,22 @@ class WebSocketManager:
         # NOTE: websocket.accept() is called by main.py BEFORE frame-based auth.
         # Do NOT call accept() here again.
         user_socks = self.user_connections.setdefault(user_id, set())
-        if len(user_socks) >= settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER:
-            logger.warning("[%s] user exceeded max websocket connections (%d), rejecting connection", user_id, settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER)
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Too many concurrent websocket connections")
-            return False
+        cnt_key = f"ws_cnt:{user_id}"
+        try:
+            curr_cnt = await self._redis.incr(cnt_key)
+            await self._redis.expire(cnt_key, 86400)  # 24h safety TTL against orphaned keys
+            if curr_cnt > settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER:
+                await self._redis.decr(cnt_key)
+                logger.warning("[%s] user exceeded global max websocket connections (%d), rejecting connection", user_id, settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER)
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Too many concurrent websocket connections")
+                return False
+        except Exception:
+            # Fallback to local worker check if Redis counter fails
+            if len(user_socks) >= settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER:
+                logger.warning("[%s] user exceeded local max websocket connections (%d), rejecting connection", user_id, settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER)
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Too many concurrent websocket connections")
+                return False
+
         user_socks.add(websocket)
         logger.info("[%s] dashboard user connected", user_id)
         key = f"user:{user_id}:{id(websocket)}"
@@ -85,7 +97,7 @@ class WebSocketManager:
         )
         return True
 
-    def disconnect_user(self, user_id: str, websocket: WebSocket) -> None:
+    async def disconnect_user(self, user_id: str, websocket: WebSocket) -> None:
         connections = self.user_connections.get(user_id)
         if connections:
             connections.discard(websocket)
@@ -95,6 +107,13 @@ class WebSocketManager:
         task = self._listen_tasks.pop(key, None)
         if task:
             task.cancel()
+        cnt_key = f"ws_cnt:{user_id}"
+        try:
+            val = await self._redis.decr(cnt_key)
+            if val <= 0:
+                await self._redis.delete(cnt_key)
+        except Exception:
+            pass
         logger.info("[%s] dashboard user disconnected", user_id)
 
     async def _forward_channel(

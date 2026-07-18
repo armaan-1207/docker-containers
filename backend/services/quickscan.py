@@ -59,7 +59,11 @@ async def run_quickscan(payload: QuickScanRequest, user, db) -> QuickScanRespons
         cached["cached"] = True
         return QuickScanResponse(**cached)
 
-    is_whitelisted = False
+    domain_lower = domain.lower()
+    is_whitelisted = any(
+        domain_lower == td or domain_lower.endswith("." + td)
+        for td in getattr(settings, "TRUSTED_ALLOWLIST_DOMAINS", [])
+    )
 
     if is_whitelisted:
         risk_score = 0.0

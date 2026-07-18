@@ -29,6 +29,7 @@ x-backend-common: &backend-common
   environment:
     - AEGIS_DB_PASSWORD=${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
     - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    - REDIS_SECURITY_PASSWORD=${REDIS_SECURITY_PASSWORD:-${REDIS_PASSWORD}}
     - REQUIRE_REAL_CERT=${REQUIRE_REAL_CERT:-false}
   volumes:
     - shared_scans:/shared/scans
@@ -38,6 +39,8 @@ x-backend-common: &backend-common
     postgres:
       condition: service_healthy
     redis:
+      condition: service_healthy
+    redis_security:
       condition: service_healthy
   security_opt:
     - no-new-privileges:true
@@ -131,7 +134,7 @@ services:
       --save 60 1
       --appendonly yes
       --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
       --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     volumes:
       - redis_data:/data
@@ -154,7 +157,7 @@ services:
       --appendonly yes
       --maxmemory 128mb
       --maxmemory-policy noeviction
-      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+      --requirepass ${REDIS_SECURITY_PASSWORD:-${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}}
     volumes:
       - redis_security_data:/data
     networks:
@@ -162,7 +165,7 @@ services:
     expose:
       - "6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_SECURITY_PASSWORD:-${REDIS_PASSWORD}}", "ping"]
       interval: 10s
       timeout: 5s
     security_opt:

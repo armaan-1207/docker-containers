@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl docker-cli haproxy \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir fastapi uvicorn pydantic
+COPY requirements.runner.txt /tmp/requirements.runner.txt
+RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.runner.txt && rm /tmp/requirements.runner.txt
 
 RUN groupadd --gid 1002 runner \
     && useradd --uid 1002 --gid runner --shell /bin/bash --create-home runner

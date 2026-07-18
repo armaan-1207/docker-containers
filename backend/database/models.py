@@ -30,7 +30,7 @@ class Scan(Base):
     __tablename__ = "scans"
 
     id = Column(String(36), primary_key=True, default=_uuid)
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     url = Column(String(2048), nullable=True)
 
     status = Column(String(64), nullable=False, default="created")
@@ -42,7 +42,7 @@ class Scan(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", back_populates="scans")
-    incidents = relationship("Incident", back_populates="scan", cascade="all, delete-orphan")
+    incidents = relationship("Incident", back_populates="scan", cascade="all, delete-orphan", passive_deletes=True)
 
     def __repr__(self):
         return f"<Scan id={self.id} status={self.status} severity={self.severity}>"
@@ -52,7 +52,7 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id = Column(String(36), primary_key=True, default=_uuid)
-    scan_id = Column(String(36), ForeignKey("scans.id"), nullable=False, index=True)
+    scan_id = Column(String(36), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
 
     severity = Column(String(16), nullable=False)
     risk_score = Column(Float, nullable=True)
@@ -61,7 +61,7 @@ class Incident(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     scan = relationship("Scan", back_populates="incidents")
-    iocs = relationship("IOC", back_populates="incident", cascade="all, delete-orphan")
+    iocs = relationship("IOC", back_populates="incident", cascade="all, delete-orphan", passive_deletes=True)
 
     def __repr__(self):
         return f"<Incident id={self.id} scan_id={self.scan_id} severity={self.severity}>"
@@ -71,7 +71,7 @@ class IOC(Base):
     __tablename__ = "iocs"
 
     id = Column(String(36), primary_key=True, default=_uuid)
-    incident_id = Column(String(36), ForeignKey("incidents.id"), nullable=False, index=True)
+    incident_id = Column(String(36), ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
 
     ioc_type = Column(String(32), nullable=False)
     value = Column(String(2048), nullable=False)

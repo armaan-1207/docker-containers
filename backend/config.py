@@ -167,23 +167,22 @@ class Settings(BaseSettings):
     # include the password (e.g. redis://redis:6379/0 → redis://:pass@redis:6379/0).
     # -------------------------
     REDIS_PASSWORD: str = ""
+    REDIS_SECURITY_PASSWORD: str = ""
     REDIS_URL: str = "redis://redis:6379/0"
     REDIS_SECURITY_URL: str = "redis://redis_security:6379/0"
     @field_validator("REDIS_URL", "REDIS_SECURITY_URL", mode="after")
     @classmethod
     def _inject_redis_password(cls, v: str, info) -> str:
         """
-        If REDIS_PASSWORD is set and the REDIS_URL does not already include
-        credentials, inject the password so the Redis client authenticates.
-
-        Input:  redis://redis:6379/0
-        Output: redis://:PASSWORD@redis:6379/0
-
-        Bug fix: original code used parsed._replace(netloc=...) which discards
-        the path component (/0 = database index). We now use urlunparse with
-        an explicit 6-tuple that preserves scheme, path, query, fragment.
+        If REDIS_PASSWORD (or REDIS_SECURITY_PASSWORD for security redis) is set and
+        the URL does not already include credentials, inject the password so the Redis
+        client authenticates.
         """
-        password = (info.data or {}).get("REDIS_PASSWORD", "")
+        data = info.data or {}
+        password = data.get("REDIS_PASSWORD", "")
+        if info.field_name == "REDIS_SECURITY_URL" or "redis_security" in v:
+            password = data.get("REDIS_SECURITY_PASSWORD") or password
+
         if not password:
             return v
         parsed = urlparse(v)
@@ -266,6 +265,15 @@ class Settings(BaseSettings):
     HIGH_THRESHOLD: int = 80
     LOG_LEVEL: str = "INFO"
 
+    # Trusted Domain Allowlist (`quickscan.py` finding #11)
+    TRUSTED_ALLOWLIST_DOMAINS: list[str] = [
+        "google.com",
+        "github.com",
+        "microsoft.com",
+        "apple.com",
+        "amazon.com",
+    ]
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
@@ -313,8 +321,8 @@ if ":latest" in settings.SANDBOX_IMAGE or "@sha256:" not in settings.SANDBOX_IMA
         "Pin SANDBOX_IMAGE by immutable digest before running."
     )
 
-if not settings.CLAMAV_FAIL_CLOSED:
+if not settings.CLAMAV_FAIL_CLOSED and settings.ENVIRONMENT == "production":
     raise RuntimeError(
-        "Secure-by-default check: CLAMAV_FAIL_CLOSED is False. "
+        "Secure-by-default check: CLAMAV_FAIL_CLOSED is False in production. "
         "Anti-malware scanning must be set to fail-closed to prevent un-scanned artifact ingestion."
     )

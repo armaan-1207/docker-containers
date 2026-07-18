@@ -1,0 +1,8 @@
+# ===================================================
+# AEGIS Sandbox Runner Microservice Dependencies (.in)
+# Run pip-compile --generate-hashes backend/requirements.runner.in -o backend/requirements.runner.txt
+# ===================================================
+
+fastapi==0.111.1
+uvicorn[standard]==0.30.1
+pydantic==2.8.2
