@@ -22,11 +22,30 @@ except Exception:
     sleep 2
 done
 
-echo "[entrypoint] Running database init (create_all)..."
+echo "[entrypoint] Running database migrations (Alembic)..."
 python -c "
-from database.database import init_db
-init_db()
-print('Database tables ensured.')
+import psycopg2
+from config import settings
+from alembic.config import Config
+from alembic import command
+
+url = settings.DATABASE_URL.replace('+psycopg2', '')
+conn = psycopg2.connect(url)
+cur = conn.cursor()
+cur.execute(\"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users');\")
+users_exists = cur.fetchone()[0]
+cur.execute(\"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'alembic_version');\")
+alembic_exists = cur.fetchone()[0]
+cur.close()
+conn.close()
+
+alembic_cfg = Config('alembic.ini')
+if users_exists and not alembic_exists:
+    print('Existing schema without alembic_version detected. Stamping baseline...')
+    command.stamp(alembic_cfg, 'head')
+else:
+    print('Running alembic upgrade head...')
+    command.upgrade(alembic_cfg, 'head')
 "
 
 echo "[entrypoint] Starting Uvicorn..."

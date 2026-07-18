@@ -144,6 +144,27 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  redis_security:
+    container_name: aegis_redis_security
+    image: redis:7.2-alpine@sha256:dfa18828cbc07b3ae6a95ec7343f6c214fdee2d836197b4be8e9904420762cd8
+    command: >
+      redis-server
+      --save 60 1
+      --appendonly yes
+      --maxmemory 128mb
+      --maxmemory-policy noeviction
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    volumes:
+      - redis_security_data:/data
+    networks:
+      - aegis_net
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -392,8 +413,6 @@ services:
           memory: 2048M
         reservations:
           cpus: "0.25"
-          memory: 512M
-
   # ---------------------------------------------------
   # 9. SANDBOX — Playwright Detonation Container
   # ---------------------------------------------------
@@ -439,6 +458,7 @@ services:
     profiles:
       - sandbox
 
+
 # -------------------------------------------------------
 # VOLUMES
 # -------------------------------------------------------
@@ -464,6 +484,9 @@ volumes:
   redis_data:
     driver: local
     name: aegis_redis_data
+  redis_security_data:
+    driver: local
+    name: aegis_redis_security_data
 
 # -------------------------------------------------------
 # NETWORKS

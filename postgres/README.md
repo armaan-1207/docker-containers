@@ -55,7 +55,7 @@ For production deployments requiring minimal RPO (Recovery Point Objective), ena
 - **Daily Backups:** Retain for **7 days** locally or in encrypted cloud object storage (AWS S3 / GCP Cloud Storage with lifecycle policies).
 - **Weekly Snapshots:** Retain 1 snapshot per week for **4 weeks**.
 - **Monthly Snapshots:** Retain 1 snapshot per month for **1 year** (compliance audit requirements).
-- **Scan Artifact Retention (`file_cleanup` task):** Shared volume scan files (`/shared/scans/<scan_id>/`) are automatically purged by Celery Beat's `tasks.file_cleanup` job after **30 days** by default (`RETENTION_DAYS=30`), preventing disk exhaustion while preserving database records (`scans` and `incidents` tables).
+- **Scan Artifact & DB Record Retention (`file_cleanup` task):** Shared volume scan files (`/shared/scans/<scan_id>/`) and corresponding database records (`scans` and `incidents` tables) are automatically purged by Celery Beat's `tasks.file_cleanup` job after **14 days** by default (`RETENTION_DAYS=14`), preventing disk and database exhaustion.
 
 ## Useful commands
 ```powershell

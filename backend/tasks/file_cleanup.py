@@ -42,6 +42,9 @@ import time
 from celery_worker import celery
 from config import settings
 from tasks import _UUID_RE
+from database.database import SessionLocal
+from database.models import Scan
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +157,20 @@ def file_cleanup_task(self, retention_days: int = 14) -> dict:
         except OSError:
             pass
 
+    # ── 4. Database Purge ──────
+    db_records_removed = 0
+    cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    try:
+        with SessionLocal() as db:
+            # Scans cascade delete to incidents and IOCs
+            deleted_count = db.query(Scan).filter(Scan.created_at <= cutoff_datetime).delete(synchronize_session=False)
+            db.commit()
+            db_records_removed = deleted_count
+            logger.info("[file_cleanup] Purged %d old scans from database.", db_records_removed)
+    except Exception as e:
+        logger.error("[file_cleanup] Failed to purge old scans from database: %s", e)
+        errors += 1
+
     summary = {
         "status": "ok",
         "shared_dir": shared_dir,
@@ -161,6 +178,7 @@ def file_cleanup_task(self, retention_days: int = 14) -> dict:
         "dirs_removed": dirs_removed,
         "dirs_skipped": dirs_skipped,
         "orphans_removed": orphans_removed,
+        "db_records_removed": db_records_removed,
         "errors": errors,
     }
     logger.info("[file_cleanup] Sweep complete: %s", summary)

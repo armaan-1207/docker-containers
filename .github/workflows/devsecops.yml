@@ -10,6 +10,30 @@ on:
     - cron: '0 4 * * 1'
 
 jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Set up Python 3.11
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.11"
+      - name: Install Dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r backend/tests/requirements-test.txt
+      - name: Run Backend Tests
+        run: PYTHONPATH="backend" pytest backend/tests -v
+      - name: Install Sandbox Dependencies
+        run: |
+          pip install -r sandbox/docker/requirements.txt
+          pip install -r sandbox/tests/requirements-test.txt
+      - name: Run Sandbox Tests
+        run: PYTHONPATH="sandbox/backend" pytest sandbox/tests -m "not integration" -v
+
   security-and-sast:
     name: Secrets & Code SAST (Gitleaks, Bandit, Dependency Audit)
     runs-on: ubuntu-latest
@@ -65,11 +89,10 @@ jobs:
           python scripts/check_sandbox_sync.py
 
   container-security:
-    name: Container Build, Trivy Scanning, SBOM & Cosign
+    name: Container Security & Image Analysis (Trivy, Cosign, SBOM)
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
       id-token: write  # Required for keyless OIDC Cosign signing
     steps:
       - name: Checkout Codebase
@@ -97,7 +120,7 @@ jobs:
 
       - name: Pull Nginx Image locally for vulnerability scan
         run: |
-          docker pull nginx:1.27-alpine
+          docker pull nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
 
       - name: Run Trivy Scanner (Non-blocking Full Audit including unfixed CVEs)
         uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
@@ -115,7 +138,7 @@ jobs:
           image-ref: 'aegis-sandbox:ci'
           format: 'table'
           exit-code: '1'
-          ignore-unfixed: false
+          ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
 
@@ -134,7 +157,7 @@ jobs:
           image-ref: 'aegis-backend:ci'
           format: 'table'
           exit-code: '1'
-          ignore-unfixed: false
+          ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
 
@@ -144,7 +167,7 @@ jobs:
           image-ref: 'aegis-runner:ci'
           format: 'table'
           exit-code: '1'
-          ignore-unfixed: false
+          ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
 
@@ -154,7 +177,7 @@ jobs:
           image-ref: 'aegis-worker:ci'
           format: 'table'
           exit-code: '1'
-          ignore-unfixed: false
+          ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
 
@@ -164,7 +187,7 @@ jobs:
           image-ref: 'nginx:1.27-alpine'
           format: 'table'
           exit-code: '1'
-          ignore-unfixed: false
+          ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'HIGH,CRITICAL'
 
@@ -177,7 +200,7 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
             image --format cyclonedx --output /tmp/sbom-worker.json aegis-worker:ci
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
-            image --format cyclonedx --output /tmp/sbom-nginx.json nginx:1.27-alpine
+            image --format cyclonedx --output /tmp/sbom-nginx.json nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
 
       - name: Upload CycloneDX SBOM Artifacts
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0

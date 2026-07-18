@@ -16,7 +16,7 @@ ALGORITHM = settings.ALGORITHM
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
 try:
-    _redis_client = redis.from_url(settings.REDIS_URL)
+    _redis_client = redis.from_url(settings.REDIS_SECURITY_URL)
 except Exception as e:
     logger.warning("Could not initialize Redis client for JWT revocation: %s", e)
     _redis_client = None

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _MAX_PASSWORD_BYTES = 72
 
 try:
-    _redis_auth_client = redis.from_url(settings.REDIS_URL)
+    _redis_auth_client = redis.from_url(settings.REDIS_SECURITY_URL)
 except Exception as e:
     logger.warning("Could not initialize Redis client for account lockout: %s", e)
     _redis_auth_client = None

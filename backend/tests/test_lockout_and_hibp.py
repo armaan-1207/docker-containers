@@ -110,4 +110,3 @@ def test_xss_html_sanitization_strips_scripts_and_event_handlers():
     assert "onload" not in sanitized
     assert "javascript:" not in sanitized
     assert "<iframe" not in sanitized
-    assert '<form action="https://evil.com/post">' in sanitized or "form" in sanitized

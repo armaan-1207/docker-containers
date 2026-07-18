@@ -168,8 +168,8 @@ class Settings(BaseSettings):
     # -------------------------
     REDIS_PASSWORD: str = ""
     REDIS_URL: str = "redis://redis:6379/0"
-
-    @field_validator("REDIS_URL", mode="after")
+    REDIS_SECURITY_URL: str = "redis://redis_security:6379/0"
+    @field_validator("REDIS_URL", "REDIS_SECURITY_URL", mode="after")
     @classmethod
     def _inject_redis_password(cls, v: str, info) -> str:
         """

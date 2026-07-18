@@ -160,6 +160,12 @@ brand-impersonation engine. Ships with no reference images or hashes
 redistributable) -- run `build_reference_set.py` yourself against
 screenshots you have the rights to use.
 
+**`scripts/setup_host_firewall.sh`** -- host-layer kernel iptables rules (`DOCKER-USER` chain) that block raw socket SSRF attempts from compromised sandbox containers destined for cloud metadata (`169.254.169.254`) and RFC 1918 internal subnets. Must be run on Linux production Docker hosts as part of node provisioning.
+
+**`backend/alembic/` & `entrypoint.sh`** -- database schema evolution managed via Alembic migrations (`alembic upgrade head`). `entrypoint.sh` automatically detects existing un-stamped databases and safely stamps `head` before applying new migrations.
+
+**TLS Certificate & Production Guardrails (`backend/config.py`)** -- strictly enforces `REQUIRE_REAL_CERT=True` and strong random 32+ character secrets (`SECRET_KEY`, `AEGIS_DB_PASSWORD`, `REDIS_PASSWORD`, `SANDBOX_RUNNER_SECRET`) whenever `ENVIRONMENT=production`.
+
 **`handoff_reference/`** -- everything that used to be Backend Team's
 API/orchestration layer built inside this repo before scope was
 corrected. See its own README for what's there and why it's kept
