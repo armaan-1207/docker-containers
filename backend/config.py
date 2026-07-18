@@ -241,6 +241,7 @@ class Settings(BaseSettings):
     SANDBOX_RUNNER_SECRET: str = ""
     SHARED_SCANS_VOLUME: Optional[str] = "aegis_shared_scans"
     SANDBOX_TIMEOUT_SEC: int = 120
+    ALLOW_GLOB_FALLBACK: bool = False
 
     # -------------------------
     # Alerting

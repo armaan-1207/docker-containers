@@ -14,3 +14,11 @@ celerybeat-schedule
 celerybeat.pid
 *.log
 logs/
+
+# Sensitive data and certificates
+*.pem
+*.key
+*.p12
+*.sqlite3
+*.sql
+*.dump

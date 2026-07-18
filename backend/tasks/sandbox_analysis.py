@@ -173,15 +173,16 @@ def _find_result_by_request_id(scan_id: str) -> Tuple[str, dict]:
         except (json.JSONDecodeError, OSError):
             pass
 
-    candidates = glob.glob(os.path.join(settings.SHARED_DIR, "scan_*.json")) + glob.glob(os.path.join(settings.SHARED_DIR, "*", "scan_*.json"))
-    for path in candidates:
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            continue
-        if data.get("scans", {}).get("request_id") == scan_id:
-            return path, data
+    if getattr(settings, "ALLOW_GLOB_FALLBACK", False):
+        candidates = glob.glob(os.path.join(settings.SHARED_DIR, "scan_*.json")) + glob.glob(os.path.join(settings.SHARED_DIR, "*", "scan_*.json"))
+        for path in candidates:
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+            if data.get("scans", {}).get("request_id") == scan_id:
+                return path, data
     raise FileNotFoundError(f"No sandbox result found for scan {scan_id} in {settings.SHARED_DIR}")
 
 

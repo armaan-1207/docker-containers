@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from database.database import get_db
 from database.models import User, Scan
 from auth.dependencies import get_current_user
+from config import settings
 
 from schemas.quick_scan import QuickScanRequest, QuickScanResponse
 from schemas.stage2 import Stage2Request, Stage2Response
@@ -181,6 +182,28 @@ async def get_scan_artifact(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact file not found.")
 
     if artifact_name == "browser.html":
+        if not sanitized:
+            is_su = getattr(current_user, "is_superuser", False) or (
+                current_user.email in getattr(settings, "SUPERUSER_EMAILS", [])
+            )
+            if not is_su:
+                logger.warning(
+                    "[AUDIT_ALERT] Unauthorized attempt to download unsanitized HTML artifact %s by user %s (id=%s)",
+                    artifact_name,
+                    current_user.email,
+                    current_user.id,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Serving unsanitized raw HTML artifacts requires superuser privileges.",
+                )
+            logger.warning(
+                "[AUDIT_LOG] Superuser %s (id=%s) downloaded unsanitized HTML artifact for scan %s",
+                current_user.email,
+                current_user.id,
+                scan_id,
+            )
+
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             raw_html = f.read()
         content = _sanitize_html_content(raw_html) if sanitized else raw_html

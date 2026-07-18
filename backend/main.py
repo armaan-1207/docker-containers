@@ -20,6 +20,7 @@ Security hardening applied:
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import logging
 import sys
@@ -80,6 +81,19 @@ else:
     logging.basicConfig(level=logging.DEBUG if settings.DEBUG else logging.INFO)
     logger = structlog.get_logger(__name__)
 
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Start background tasks on startup, clean up on shutdown."""
+    websocket_manager.start_heartbeat(interval_sec=300)
+    yield
+    # Cancel the heartbeat task (and any orphaned listen tasks)
+    hb_task = websocket_manager._listen_tasks.get("__heartbeat__")
+    if hb_task:
+        hb_task.cancel()
+
+
 # ─── Application ────────────────────────────────────────────────────────────
 # Swagger/ReDoc disabled when is_production=True or DEBUG=False.
 app = FastAPI(
@@ -88,6 +102,7 @@ app = FastAPI(
     docs_url=None if settings.is_production else "/docs",
     redoc_url=None if settings.is_production else "/redoc",
     openapi_url=None if settings.is_production else "/openapi.json",
+    lifespan=_lifespan,
 )
 
 # ─── CORS — Security finding #16 fix ────────────────────────────────────────

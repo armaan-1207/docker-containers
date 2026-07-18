@@ -33,6 +33,7 @@ Image.MAX_IMAGE_PIXELS = 25_000_000  # 5,000 x 5,000 px limit (~100MB max RGBA m
 from database.models import Scan
 from config import settings
 from schemas.stage2 import Stage2Request, Stage2Response, JobStatus
+from services.malware_scanner import scan_file_clamav
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,21 @@ async def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Respons
     html_path = os.path.join(scan_dir, "browser.html")
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html_content)
+
+    # ── Malware verification via ClamAV (security finding #2) ─────────────
+    clean_png, png_details = scan_file_clamav(png_path)
+    clean_html, html_details = scan_file_clamav(html_path)
+    if not clean_png or not clean_html:
+        # Delete unverified / malicious files before rejecting request
+        for p in (png_path, html_path):
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+        raise ValueError(
+            f"Malware check rejected Stage 2 upload: {png_details} | {html_details}"
+        )
 
     # ── Queue Celery pipeline ─────────────────────────────────────────────
     from tasks.browser_features import browser_features_task

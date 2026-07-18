@@ -167,5 +167,52 @@ class WebSocketManager:
         except Exception:
             logger.exception("[%s] failed to publish risk update to redis", scan_id)
 
+    async def reconcile_counters(self) -> None:
+        """
+        Reconcile Redis ws_cnt:{user_id} counters with in-process connection state.
+
+        Under normal operation the incr/decr pair in connect_user/disconnect_user
+        keeps Redis in sync.  After a worker crash or SIGKILL those decrements are
+        never issued, so the counter drifts above the real connection count and
+        users get erroneously rejected.  This method corrects the drift by setting
+        each counter to the number of sockets currently held by this worker process.
+
+        It is intentionally conservative: it only touches keys for users this worker
+        knows about, so it cannot race with other workers' legitimate counters.
+        """
+        for user_id, sockets in list(self.user_connections.items()):
+            actual = len(sockets)
+            cnt_key = f"ws_cnt:{user_id}"
+            try:
+                if actual == 0:
+                    await self._redis.delete(cnt_key)
+                    logger.debug("[heartbeat] Deleted stale ws_cnt key for user %s", user_id)
+                else:
+                    await self._redis.set(cnt_key, actual, ex=86400)
+                    logger.debug("[heartbeat] Reconciled ws_cnt for user %s -> %d", user_id, actual)
+            except Exception:
+                logger.exception("[heartbeat] Failed to reconcile ws_cnt for user %s", user_id)
+
+    async def _heartbeat_loop(self, interval_sec: int = 300) -> None:
+        """Background coroutine that reconciles counters on a fixed interval."""
+        while True:
+            try:
+                await asyncio.sleep(interval_sec)
+                await self.reconcile_counters()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("[heartbeat] Unexpected error during counter reconciliation")
+
+    def start_heartbeat(self, interval_sec: int = 300) -> asyncio.Task:
+        """
+        Schedule the heartbeat reconciliation loop as a background asyncio Task.
+        Should be called once the event loop is running (e.g. in a FastAPI startup handler).
+        """
+        task = asyncio.create_task(self._heartbeat_loop(interval_sec))
+        self._listen_tasks["__heartbeat__"] = task
+        logger.info("[heartbeat] WebSocket counter reconciliation started (interval=%ds)", interval_sec)
+        return task
+
 
 websocket_manager = WebSocketManager()

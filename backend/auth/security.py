@@ -25,58 +25,77 @@ except Exception as e:
     _redis_auth_client = None
 
 
-def check_account_lockout(email: str) -> bool:
+def _lockout_keys(email: str, client_ip: str = "") -> Tuple[str, str]:
+    normalized_email = email.lower().strip()
+    ip_part = f":{client_ip.strip()}" if client_ip and client_ip.strip() else ""
+    return f"login_attempts:{normalized_email}{ip_part}", f"login_global:{normalized_email}"
+
+
+def check_account_lockout(email: str, client_ip: str = "") -> bool:
     """
     Returns True if account is currently locked out due to excessive failed login attempts.
+    Security finding #1 remediation: checks IP-scoped key first (e.g. 5 attempts per IP),
+    and falls back to checking a global per-email counter at a higher threshold (25 attempts)
+    to prevent single-email spam from locking out legitimate users on other IPs while stopping
+    distributed botnet brute-forcing.
     """
     if not _redis_auth_client:
         if getattr(settings, "AUTH_LOCKOUT_FAIL_CLOSED", True) or settings.is_production:
             logger.error("Redis unavailable during account lockout check (fail-closed)")
             raise ValueError("Authentication store unavailable")
         return False
-    normalized_email = email.lower().strip()
+    
+    ip_key, global_key = _lockout_keys(email, client_ip)
     try:
-        attempts = _redis_auth_client.get(f"login_attempts:{normalized_email}")
-        if attempts and int(attempts) >= settings.MAX_LOGIN_ATTEMPTS:
+        ip_attempts = _redis_auth_client.get(ip_key)
+        if ip_attempts and int(ip_attempts) >= settings.MAX_LOGIN_ATTEMPTS:
+            return True
+        global_attempts = _redis_auth_client.get(global_key)
+        global_threshold = getattr(settings, "MAX_GLOBAL_LOGIN_ATTEMPTS", settings.MAX_LOGIN_ATTEMPTS * 5)
+        if global_attempts and int(global_attempts) >= global_threshold:
+            logger.warning("Account %s locked globally due to distributed failed logins (storm pattern)", email)
             return True
         return False
     except redis.exceptions.RedisError as e:
-        logger.error("Redis error checking account lockout for %s: %s", normalized_email, e)
+        logger.error("Redis error checking account lockout for %s: %s", email, e)
         if getattr(settings, "AUTH_LOCKOUT_FAIL_CLOSED", True) or settings.is_production:
             raise ValueError("Authentication store unavailable")
         return False
 
 
-def record_failed_login(email: str) -> int:
+def record_failed_login(email: str, client_ip: str = "") -> int:
     """
-    Increments failed login counter for normalized email. Sets expiration on first failure.
-    Returns new attempt count.
+    Increments failed login counter for both IP-scoped and global counters.
+    Returns new attempt count for the active scope.
     """
     if not _redis_auth_client:
         return 0
-    normalized_email = email.lower().strip()
-    key = f"login_attempts:{normalized_email}"
+    ip_key, global_key = _lockout_keys(email, client_ip)
     try:
-        count = _redis_auth_client.incr(key)
+        count = _redis_auth_client.incr(ip_key)
         if count == 1:
-            _redis_auth_client.expire(key, settings.LOCKOUT_DURATION_SECONDS)
+            _redis_auth_client.expire(ip_key, settings.LOCKOUT_DURATION_SECONDS)
+        g_count = _redis_auth_client.incr(global_key)
+        if g_count == 1:
+            _redis_auth_client.expire(global_key, settings.LOCKOUT_DURATION_SECONDS * 2)
         return count
     except redis.exceptions.RedisError as e:
-        logger.error("Redis error recording failed login for %s: %s", normalized_email, e)
+        logger.error("Redis error recording failed login for %s: %s", email, e)
         return 0
 
 
-def reset_failed_login(email: str) -> None:
+def reset_failed_login(email: str, client_ip: str = "") -> None:
     """
     Resets failed login counter on successful login.
     """
     if not _redis_auth_client:
         return
-    normalized_email = email.lower().strip()
+    ip_key, global_key = _lockout_keys(email, client_ip)
     try:
-        _redis_auth_client.delete(f"login_attempts:{normalized_email}")
+        _redis_auth_client.delete(ip_key, global_key)
     except redis.exceptions.RedisError as e:
-        logger.warning("Redis error resetting failed login for %s: %s", normalized_email, e)
+        logger.warning("Redis error resetting failed login for %s: %s", email, e)
+
 
 
 def _pre_hash(password: str) -> bytes:
@@ -154,10 +173,16 @@ def record_hibp_failure_metric() -> None:
     """
     Increment telemetry counter when HIBP API reachability fails.
     Allows operations to alert on prolonged external API outages while failing open.
+    Security finding #9 remediation: emits structured critical warning for SIEM/Slack alerts when threshold is breached.
     """
     if _redis_auth_client:
         try:
-            _redis_auth_client.incr("metric:hibp_api_failures")
+            failures = _redis_auth_client.incr("metric:hibp_api_failures")
+            if failures == 1:
+                _redis_auth_client.expire("metric:hibp_api_failures", 3600)  # 1h window
+            threshold = getattr(settings, "HIBP_FAILURE_ALERT_THRESHOLD", 10)
+            if failures >= threshold and failures % threshold == 0:
+                logger.critical("ALERT [HIBP_OUTAGE]: %d HIBP API failures recorded in past hour. Password breach checks are currently failing open!", failures)
         except Exception as e:
             logger.debug("Failed to record HIBP failure telemetry: %s", e)
 

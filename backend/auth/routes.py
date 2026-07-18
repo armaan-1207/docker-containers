@@ -94,6 +94,7 @@ def register(
 
 @router.post("/login", response_model=TokenResponse)
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ) -> TokenResponse:
@@ -106,8 +107,9 @@ def login(
     is always paid and response time does not leak whether the email exists.
     """
     email = (form_data.username or "").lower().strip()
+    client_ip = request.client.host if request.client else None
     try:
-        if check_account_lockout(email):
+        if check_account_lockout(email, client_ip):
             logger.warning("Login blocked for locked account: %s", email)
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -134,10 +136,10 @@ def login(
     )
 
     if user is None or not password_valid:
-        record_failed_login(email)
+        record_failed_login(email, client_ip)
         raise invalid_credentials
 
-    reset_failed_login(email)
+    reset_failed_login(email, client_ip)
 
     # Automatic hash rotation: upgrade legacy hash to SHA-256 pre-hashed format on successful login
     if needs_rehash:

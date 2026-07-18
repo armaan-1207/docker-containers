@@ -42,11 +42,32 @@ def test_record_and_reset_failed_login():
     with patch.object(security_module, "_redis_auth_client", mock_redis):
         with patch.object(security_module.settings, "LOCKOUT_DURATION_SECONDS", 900):
             record_failed_login("test@example.com")
-            mock_redis.incr.assert_called_once_with("login_attempts:test@example.com")
-            mock_redis.expire.assert_called_once_with("login_attempts:test@example.com", 900)
+            mock_redis.incr.assert_any_call("login_attempts:test@example.com")
+            mock_redis.incr.assert_any_call("login_global:test@example.com")
+            mock_redis.expire.assert_any_call("login_attempts:test@example.com", 900)
 
             reset_failed_login("test@example.com")
-            mock_redis.delete.assert_called_once_with("login_attempts:test@example.com")
+            mock_redis.delete.assert_called_once_with("login_attempts:test@example.com", "login_global:test@example.com")
+
+
+def test_ip_scoped_account_lockout():
+    mock_redis = MagicMock()
+    # IP 1.2.3.4 has 5 attempts (locked), but global is only 5 (under global threshold of 25)
+    def fake_get(key):
+        if key == "login_attempts:test@example.com:1.2.3.4":
+            return "5"
+        if key == "login_attempts:test@example.com:5.6.7.8":
+            return "1"
+        if key == "login_global:test@example.com":
+            return "6"
+        return None
+    mock_redis.get.side_effect = fake_get
+    with patch.object(security_module, "_redis_auth_client", mock_redis):
+        with patch.object(security_module.settings, "MAX_LOGIN_ATTEMPTS", 5):
+            # 1.2.3.4 is locked
+            assert check_account_lockout("test@example.com", client_ip="1.2.3.4") is True
+            # 5.6.7.8 is NOT locked because lockout is IP-scoped
+            assert check_account_lockout("test@example.com", client_ip="5.6.7.8") is False
 
 
 def test_check_pwned_password_k_anonymity_match():

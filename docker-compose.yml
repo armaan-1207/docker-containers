@@ -33,6 +33,10 @@ x-backend-common: &backend-common
     - REQUIRE_REAL_CERT=${REQUIRE_REAL_CERT:-false}
   volumes:
     - shared_scans:/shared/scans
+  read_only: true
+  tmpfs:
+    - /tmp
+    - /app/.cache
   networks:
     - aegis_net
   depends_on:

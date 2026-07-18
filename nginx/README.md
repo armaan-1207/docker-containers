@@ -17,7 +17,7 @@ Image: `nginx:1.27-alpine`
 - **No trailing slash** on `/api/` proxy_pass → FastAPI sees the full `/api/...` path
 - **WebSocket**: `proxy_set_header Upgrade $http_upgrade` + `Connection "upgrade"`
 - **Timeouts**: WS read/send set to 3600s to keep scanner connections alive
-- **Body size**: `client_max_body_size 50M` for screenshot uploads
+- **Body size**: `client_max_body_size 20M` for screenshot uploads (aligned with backend limits)
 - **Gzip**: enabled for all API responses
 
 ## Files
