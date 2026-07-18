@@ -33,7 +33,7 @@ x-backend-common: &backend-common
     - REQUIRE_REAL_CERT=${REQUIRE_REAL_CERT:-false}
   volumes:
     - shared_scans:/shared/scans
-  read_only: true
+  read_only: false
   tmpfs:
     - /tmp
     - /app/.cache
@@ -92,6 +92,11 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
     restart: unless-stopped
     <<: *default-resources
 
@@ -155,6 +160,7 @@ services:
   redis_security:
     container_name: aegis_redis_security
     image: redis:7.2-alpine@sha256:dfa18828cbc07b3ae6a95ec7343f6c214fdee2d836197b4be8e9904420762cd8
+    user: "999"
     command: >
       redis-server
       --save 60 1
@@ -270,7 +276,16 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+      - DAC_OVERRIDE
     read_only: true
+    tmpfs:
+      - /tmp
+      - /run
     restart: unless-stopped
     deploy:
       resources:
@@ -290,13 +305,14 @@ services:
       DOCKER_HOST: tcp://docker_socket_proxy:2375
       SANDBOX_NETWORK: aegis_sandbox_net
       SHARED_SCANS_VOLUME: aegis_shared_scans
-      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c}
       SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:?SANDBOX_RUNNER_SECRET must be set in .env}
       PROXY_BASIC_AUTH: ${PROXY_BASIC_AUTH:?PROXY_BASIC_AUTH must be set in .env}
       MAX_CONCURRENT_DETONATIONS: "10"
     networks:
       - aegis_net          # celery_worker communicates here via RPC
       - docker_proxy_net   # docker_socket_proxy ONLY reachable by this service
+      - sandbox_net        # ensures docker compose always creates aegis_sandbox_net on startup
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -334,6 +350,10 @@ services:
       --queues=default,sandbox,alerts
       --hostname=worker@%h
     environment:
+      AEGIS_DB_PASSWORD: ${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+      REDIS_SECURITY_PASSWORD: ${REDIS_SECURITY_PASSWORD:-${REDIS_PASSWORD}}
+      REQUIRE_REAL_CERT: ${REQUIRE_REAL_CERT:-false}
       SANDBOX_RUNNER_URL: http://aegis_sandbox_runner:8002/detonate
       SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:?SANDBOX_RUNNER_SECRET must be set in .env}
       CLAMAV_HOST: clamav
@@ -404,7 +424,7 @@ services:
     expose:
       - "3310"
     healthcheck:
-      test: ["CMD-SHELL", "echo zPING | nc localhost 3310 | grep -q PONG || exit 1"]
+      test: ["CMD-SHELL", "echo PING | nc localhost 3310 | grep -q PONG || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -413,6 +433,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
     restart: unless-stopped
     deploy:
       resources:
@@ -511,5 +537,6 @@ networks:
 
   sandbox_net:
     driver: bridge
+    attachable: true
     internal: false   # internet egress allowed for URL detonation
     name: aegis_sandbox_net

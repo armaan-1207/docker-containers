@@ -237,7 +237,7 @@ class Settings(BaseSettings):
     ARTIFACT_RETENTION_DAYS: int = 14
 
     SANDBOX_NETWORK: Optional[str] = "aegis_sandbox_net"
-    SANDBOX_IMAGE: str = "aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9"
+    SANDBOX_IMAGE: str = "aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c"
     SANDBOX_RUNNER_SECRET: str = ""
     SHARED_SCANS_VOLUME: Optional[str] = "aegis_shared_scans"
     SANDBOX_TIMEOUT_SEC: int = 120

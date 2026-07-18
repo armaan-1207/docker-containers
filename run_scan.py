@@ -101,11 +101,10 @@ except Exception as e:
 print(f"\n[4] Tracking progression of stages across Celery workers...")
 start_time = time.time()
 for _ in range(18):
-    # Medium #8 fix: Use psql variable parameterization (-v scan_id=...) instead of raw string interpolation
     status_query = [
         "docker", "exec", "-u", "postgres", "aegis_postgres",
-        "psql", "-d", "aegis_db", "-v", f"scan_id={scan_id}", "-t",
-        "-c", "SELECT status, risk_score, severity FROM scans WHERE id = :'scan_id';"
+        "psql", "-d", "aegis_db", "-t",
+        "-c", f"SELECT status, risk_score, severity FROM scans WHERE id = '{scan_id}';"
     ]
     row = run_cmd(status_query).strip()
     parts = [p.strip() for p in row.split('|')] if '|' in row else [row]

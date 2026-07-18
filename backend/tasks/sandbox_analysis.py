@@ -260,6 +260,10 @@ def sandbox_analysis_task(self, scan_id: str):
 
     scan_dir = _scan_dir(scan_id)
     os.makedirs(scan_dir, exist_ok=True)
+    try:
+        os.chmod(scan_dir, 0o777)
+    except OSError:
+        pass
 
     try:
         sandbox_result = _call_sandbox(scan_id)

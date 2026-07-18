@@ -135,6 +135,10 @@ async def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Respons
 
     scan_dir = _scan_dir(scan_id)
     os.makedirs(scan_dir, exist_ok=True)
+    try:
+        os.chmod(scan_dir, 0o777)
+    except OSError:
+        pass
 
     # ── Persist validated artifacts ───────────────────────────────────────
     png_path = os.path.join(scan_dir, "browser.png")
