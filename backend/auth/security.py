@@ -4,7 +4,6 @@ auth/security.py
 """
 
 import hashlib
-import hmac
 import logging
 import urllib.request
 import urllib.error

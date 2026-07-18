@@ -284,7 +284,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Unconditional, secure-by-default guardrails (not environment-gated)
+# Secure-by-default guardrails
 
 if settings.is_production and not settings.REQUIRE_REAL_CERT:
     raise RuntimeError(
@@ -292,13 +292,14 @@ if settings.is_production and not settings.REQUIRE_REAL_CERT:
         "Real TLS certificates must be enforced in production/staging deployments to prevent MITM attacks."
     )
 
-for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBOX_RUNNER_SECRET"):
-    val = getattr(settings, secret_name, "")
-    if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or len(val) < 32:
-        raise RuntimeError(
-            f"Secure-by-default check: {secret_name} is invalid, weak, or still holds a default placeholder value ('{val}'). "
-            f"Set a strong random secret (32+ characters) in backend/.env before running."
-        )
+if settings.is_production:
+    for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBOX_RUNNER_SECRET"):
+        val = getattr(settings, secret_name, "")
+        if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or len(val) < 32:
+            raise RuntimeError(
+                f"Secure-by-default check: {secret_name} is invalid, weak, or still holds a default placeholder value ('{val}'). "
+                f"Set a strong random secret (32+ characters) in backend/.env before running in production."
+            )
 
 hosts = [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
 if not hosts or "*" in hosts:

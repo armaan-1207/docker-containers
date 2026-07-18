@@ -54,7 +54,7 @@ jobs:
       - name: Install SAST & Dependency Audit Tools
         run: |
           pip install --upgrade pip
-          pip install bandit pip-audit
+          pip install bandit pip-audit ruff
 
       - name: Run Gitleaks Secret Scanner
         uses: gitleaks/gitleaks-action@c2b186b7ae0ca0fbb35a8233a1e94474ee4cf012 # v2.3.4
@@ -71,6 +71,11 @@ jobs:
           pip install pip-tools
           pip-compile --dry-run backend/requirements.in -o /tmp/requirements.txt
           cmp --silent /tmp/requirements.txt backend/requirements.txt || (echo "FATAL: backend/requirements.txt is out of sync with backend/requirements.in. Run pip-compile to update it." && exit 1)
+
+      - name: Run Ruff Linter
+        run: |
+          echo "Running Ruff check for undefined names, syntax errors, and import issues..."
+          ruff check backend/ sandbox/backend/ --select=E,F --ignore=E501
 
       - name: Run Bandit Python SAST
         run: |

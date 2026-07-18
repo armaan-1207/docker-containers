@@ -23,7 +23,6 @@ import io
 import logging
 import os
 import re
-import uuid
 
 from PIL import Image, UnidentifiedImageError
 
