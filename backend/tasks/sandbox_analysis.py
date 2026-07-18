@@ -162,8 +162,8 @@ def _find_result_by_request_id(scan_id: str) -> Tuple[str, dict]:
     no match is found.
     """
     validate_scan_id(scan_id)
-    # Check exact per-scan path first, then fall back to glob checking both root and subdirectories
-    exact_path = os.path.join(settings.SHARED_DIR, scan_id, f"scan_{scan_id}.json")
+    scan_dir = os.path.join(settings.SHARED_DIR, scan_id)
+    exact_path = os.path.join(scan_dir, f"scan_{scan_id}.json")
     if os.path.exists(exact_path):
         try:
             with open(exact_path) as f:
@@ -172,6 +172,19 @@ def _find_result_by_request_id(scan_id: str) -> Tuple[str, dict]:
                 return exact_path, data
         except (json.JSONDecodeError, OSError):
             pass
+
+    # Check any scan_*.json inside scan_dir before volume-wide globbing
+    if os.path.isdir(scan_dir):
+        for path in glob.glob(os.path.join(scan_dir, "scan_*.json")):
+            if path == exact_path:
+                continue
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+                if data.get("scans", {}).get("request_id") == scan_id:
+                    return path, data
+            except (json.JSONDecodeError, OSError):
+                continue
 
     if getattr(settings, "ALLOW_GLOB_FALLBACK", False):
         candidates = glob.glob(os.path.join(settings.SHARED_DIR, "scan_*.json")) + glob.glob(os.path.join(settings.SHARED_DIR, "*", "scan_*.json"))
@@ -189,19 +202,22 @@ def _find_result_by_request_id(scan_id: str) -> Tuple[str, dict]:
 def _cleanup_sandbox_root_files(json_path: str, sandbox_result: dict) -> None:
     """
     The sandbox container writes its own JSON and BOTH screenshots flat
-    into the shared volume ROOT (not the per-scan subdirectory) --
-    only the homepage screenshot ever gets moved into scan_dir by the
-    caller below. Left alone, the raw JSON and the full-page screenshot
-    accumulate at the volume root forever, across every scan ever run.
-    Delete them once we've extracted what we actually need.
+    into the shared volume ROOT or per-scan subdirectory -- only the homepage
+    screenshot gets renamed/moved to sandbox.png by the caller below.
+    Delete leftover raw JSON and full-page screenshots after processing.
     """
     candidates = [json_path]
     full_page_path = sandbox_result.get("screenshots", {}).get("fullpage_screenshot_path")
     if full_page_path:
         if not os.path.exists(full_page_path):
-            worker_full = os.path.join(settings.SHARED_DIR, os.path.basename(full_page_path))
-            if os.path.exists(worker_full):
-                full_page_path = worker_full
+            req_id = sandbox_result.get("scans", {}).get("request_id") or ""
+            for worker_full in (
+                os.path.join(settings.SHARED_DIR, req_id, os.path.basename(full_page_path)) if req_id else None,
+                os.path.join(settings.SHARED_DIR, os.path.basename(full_page_path)),
+            ):
+                if worker_full and os.path.exists(worker_full):
+                    full_page_path = worker_full
+                    break
         candidates.append(full_page_path)
 
     for path in candidates:
@@ -223,11 +239,20 @@ def _call_sandbox(scan_id: str) -> dict:
     # Anti-malware check (ClamAV) on generated artifacts & downloads
     is_clean, details = scan_file_clamav(json_path)
     full_page_path = sandbox_result.get("screenshots", {}).get("fullpage_screenshot_path")
-    if full_page_path and os.path.exists(full_page_path):
-        clean_screenshot, scr_details = scan_file_clamav(full_page_path)
-        if not clean_screenshot:
-            is_clean = False
-            details += f" | Screenshot: {scr_details}"
+    if full_page_path:
+        if not os.path.exists(full_page_path):
+            for cand in (
+                os.path.join(settings.SHARED_DIR, scan_id, os.path.basename(full_page_path)),
+                os.path.join(settings.SHARED_DIR, os.path.basename(full_page_path)),
+            ):
+                if os.path.exists(cand):
+                    full_page_path = cand
+                    break
+        if os.path.exists(full_page_path):
+            clean_screenshot, scr_details = scan_file_clamav(full_page_path)
+            if not clean_screenshot:
+                is_clean = False
+                details += f" | Screenshot: {scr_details}"
 
     for drow in sandbox_result.get("downloads", []):
         qpath = drow.get("quarantined_path")
@@ -295,9 +320,13 @@ def sandbox_analysis_task(self, scan_id: str):
     for key, dst_name in (("homepage_screenshot_path", "sandbox.png"),):
         src = screenshots.get(key)
         if src and not os.path.exists(src):
-            worker_src = os.path.join(settings.SHARED_DIR, os.path.basename(src))
-            if os.path.exists(worker_src):
-                src = worker_src
+            for cand in (
+                os.path.join(scan_dir, os.path.basename(src)),
+                os.path.join(settings.SHARED_DIR, os.path.basename(src)),
+            ):
+                if os.path.exists(cand):
+                    src = cand
+                    break
         if src and os.path.exists(src):
             dst = os.path.join(scan_dir, dst_name)
             if os.path.abspath(src) != os.path.abspath(dst):

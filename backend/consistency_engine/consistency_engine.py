@@ -150,13 +150,14 @@ class ConsistencyEngine:
 
     def compare_metadata(self, browser_dom: dict, sandbox_metadata: dict) -> dict:
         browser_title = (browser_dom or {}).get("title", "")
-        sandbox_title = (sandbox_metadata or {}).get("title", "")
+        sandbox_pages = (sandbox_metadata or {}).get("pages", {})
+        sandbox_title = sandbox_pages.get("page_title", "") or (sandbox_metadata or {}).get("title", "")
         title_similarity = difflib.SequenceMatcher(
             None, browser_title.strip(), sandbox_title.strip()
         ).ratio()
 
         browser_url = (browser_dom or {}).get("final_url", "")
-        sandbox_url = (sandbox_metadata or {}).get("final_url", "")
+        sandbox_url = sandbox_pages.get("final_url", "") or (sandbox_metadata or {}).get("final_url", "")
         if not browser_url and not sandbox_url:
             url_match = 1.0
         else:

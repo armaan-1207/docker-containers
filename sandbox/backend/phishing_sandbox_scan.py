@@ -817,7 +817,7 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
     downloads = []
     blocked_requests = []
 
-    scan_id = str(uuid.uuid4())
+    scan_id = str(request_id) if request_id else str(uuid.uuid4())
     scan_start_time = now_iso()
     mark(f"scan started for {url}")
 
