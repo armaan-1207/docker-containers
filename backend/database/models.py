@@ -44,6 +44,14 @@ class Scan(Base):
 
     user = relationship("User", back_populates="scans")
     incidents = relationship("Incident", back_populates="scan", cascade="all, delete-orphan", passive_deletes=True)
+    
+    # Telemetry relationships
+    network_activity = relationship("NetworkActivity", back_populates="scan", cascade="all, delete-orphan", passive_deletes=True)
+    tls_connections = relationship("TLSConnection", back_populates="scan", cascade="all, delete-orphan", passive_deletes=True)
+    form_metrics = relationship("FormMetrics", back_populates="scan", cascade="all, delete-orphan", passive_deletes=True)
+    downloads = relationship("Download", back_populates="scan", cascade="all, delete-orphan", passive_deletes=True)
+    redirects = relationship("Redirect", back_populates="scan", cascade="all, delete-orphan", passive_deletes=True)
+    evasion_techniques = relationship("EvasionTechnique", back_populates="scan", cascade="all, delete-orphan", passive_deletes=True)
 
     def __repr__(self):
         return f"<Scan id={self.id} status={self.status} severity={self.severity}>"
@@ -99,3 +107,72 @@ class Statistics(Base):
             f"<Statistics total={self.total_incidents} "
             f"critical={self.critical_count} high={self.high_count}>"
         )
+
+
+class NetworkActivity(Base):
+    __tablename__ = "network_activity"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    scan_id = Column(String(36), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    method = Column(String(16), nullable=True)
+    url = Column(String(2048), nullable=False)
+    domain = Column(String(255), nullable=True, index=True)
+    ip_address = Column(String(64), nullable=True, index=True)
+    status = Column(Integer, nullable=True)
+    headers = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    scan = relationship("Scan", back_populates="network_activity")
+
+class TLSConnection(Base):
+    __tablename__ = "tls_connections"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    scan_id = Column(String(36), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    domain = Column(String(255), nullable=False, index=True)
+    protocol = Column(String(64), nullable=True)
+    cipher = Column(String(128), nullable=True)
+    issuer = Column(String(512), nullable=True)
+    valid_from = Column(DateTime, nullable=True)
+    valid_to = Column(DateTime, nullable=True)
+    is_suspicious = Column(Boolean, nullable=False, default=False)
+    cert_chain = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    scan = relationship("Scan", back_populates="tls_connections")
+
+class FormMetrics(Base):
+    __tablename__ = "form_metrics"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    scan_id = Column(String(36), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    action_url = Column(String(2048), nullable=True)
+    input_types = Column(JSONB, nullable=True)
+    has_password_field = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    scan = relationship("Scan", back_populates="form_metrics")
+
+class Download(Base):
+    __tablename__ = "downloads"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    scan_id = Column(String(36), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    url = Column(String(2048), nullable=False)
+    mime_type = Column(String(128), nullable=True)
+    filename = Column(String(255), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    scan = relationship("Scan", back_populates="downloads")
+
+class Redirect(Base):
+    __tablename__ = "redirects"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    scan_id = Column(String(36), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_url = Column(String(2048), nullable=False)
+    to_url = Column(String(2048), nullable=False)
+    status_code = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    scan = relationship("Scan", back_populates="redirects")
+
+class EvasionTechnique(Base):
+    __tablename__ = "evasion_techniques"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    scan_id = Column(String(36), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    technique_name = Column(String(128), nullable=False)
+    evidence_snippet = Column(String(2048), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    scan = relationship("Scan", back_populates="evasion_techniques")

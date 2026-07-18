@@ -36,7 +36,7 @@ from celery_worker import celery
 from config import settings
 from services.malware_scanner import scan_file_clamav
 from database.database import get_db_session
-from database.models import Scan
+from database.models import Scan, NetworkActivity, TLSConnection, FormMetrics, Download, Redirect, EvasionTechnique
 from tasks import validate_scan_id
 
 logger = logging.getLogger(__name__)
@@ -45,43 +45,6 @@ SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", settings.SANDBOX_IMAGE)
 SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", settings.SHARED_SCANS_VOLUME)
 SANDBOX_RUNNER_URL = os.environ.get("SANDBOX_RUNNER_URL", "http://aegis_sandbox_runner:8002/detonate")
 SANDBOX_RUNNER_SECRET = os.environ.get("SANDBOX_RUNNER_SECRET", settings.SANDBOX_RUNNER_SECRET)
-
-# Network to attach the sandbox container to (must be isolated from aegis_net).
-#
-# DEVSECOPS_TODO #3: the fallback below is a GUESS at Docker Compose's
-# auto-generated network name (<project_name>_sandbox_net), which only
-# matches if this repo's checkout directory is literally named
-# "docker-containers" (Compose derives the project name from the
-# directory unless COMPOSE_PROJECT_NAME is set). Any other checkout
-# path/name means this guess is simply wrong, and `docker run --network
-# <wrong-name>` fails at spawn time for every single scan.
-#
-# This can't be fixed with a better hardcoded guess — the real fix is
-# setting SANDBOX_NETWORK explicitly in backend/.env for your actual
-# deployment. What CAN be fixed here is not failing silently: log a
-# clear warning on import so this shows up in the worker's own startup
-# logs instead of only surfacing as a confusing per-scan Docker error
-# with no obvious cause.
-_SANDBOX_NETWORK_ENV = os.environ.get("SANDBOX_NETWORK") or getattr(settings, "SANDBOX_NETWORK", None)
-if _SANDBOX_NETWORK_ENV:
-    SANDBOX_NETWORK = _SANDBOX_NETWORK_ENV
-else:
-    raise RuntimeError(
-        "FATAL: SANDBOX_NETWORK is not set in environment or backend/.env. "
-        "Set it explicitly (e.g. SANDBOX_NETWORK=aegis_sandbox_net) to match "
-        "docker-compose.yml so container attachment succeeds across directories."
-    )
-
-_SHARED_VOLUME_ENV = os.environ.get("SHARED_SCANS_VOLUME") or getattr(settings, "SHARED_SCANS_VOLUME", None)
-if _SHARED_VOLUME_ENV:
-    SHARED_VOLUME_NAME = _SHARED_VOLUME_ENV
-else:
-    raise RuntimeError(
-        "FATAL: SHARED_SCANS_VOLUME is not set in environment or backend/.env. "
-        "Refusing to start worker or execute sandbox scans. "
-        "Run `docker volume ls` to find the exact shared volume name (e.g. dockercontainers_shared_scans) "
-        "and set SHARED_SCANS_VOLUME explicitly."
-    )
 
 
 def _scan_dir(scan_id: str) -> str:
@@ -316,6 +279,11 @@ def sandbox_analysis_task(self, scan_id: str):
     with open(metadata_path, "w") as f:
         json.dump(sandbox_result, f, indent=2, default=str)
 
+    try:
+        _save_telemetry_to_postgres(scan_id, sandbox_result)
+    except Exception:
+        logger.exception("[%s] Failed to ingest sandbox telemetry to Postgres", scan_id)
+
     screenshots = sandbox_result.get("screenshots", {})
     for key, dst_name in (("homepage_screenshot_path", "sandbox.png"),):
         src = screenshots.get(key)
@@ -342,3 +310,69 @@ def sandbox_analysis_task(self, scan_id: str):
     consistency_task.delay(scan_id)
 
     return {"scan_id": scan_id, "status": "sandbox_analysis_done"}
+
+
+def _save_telemetry_to_postgres(scan_id: str, sandbox_result: dict) -> None:
+    with get_db_session() as db:
+        # Ingest Network Activity
+        for req in sandbox_result.get("network_activity", []):
+            db.add(NetworkActivity(
+                scan_id=scan_id,
+                method=req.get("method"),
+                url=req.get("url"),
+                domain=req.get("domain"),
+                ip_address=req.get("ip_address"),
+                status=req.get("status"),
+                headers=req.get("headers")
+            ))
+            
+        # Ingest TLS Connections
+        for tls in sandbox_result.get("tls_connections", []):
+            db.add(TLSConnection(
+                scan_id=scan_id,
+                domain=tls.get("domain"),
+                protocol=tls.get("protocol"),
+                cipher=tls.get("cipher"),
+                issuer=tls.get("issuer"),
+                is_suspicious=tls.get("is_suspicious", False),
+                cert_chain=tls.get("cert_chain")
+            ))
+            
+        # Ingest Form Metrics
+        form_metrics = sandbox_result.get("form_metrics", {})
+        if form_metrics:
+            db.add(FormMetrics(
+                scan_id=scan_id,
+                action_url=form_metrics.get("action_url"),
+                input_types=form_metrics.get("input_types"),
+                has_password_field=form_metrics.get("has_password_field", False)
+            ))
+            
+        # Ingest Downloads
+        for dl in sandbox_result.get("downloads", []):
+            db.add(Download(
+                scan_id=scan_id,
+                url=dl.get("url"),
+                mime_type=dl.get("mime_type"),
+                filename=dl.get("filename"),
+                size_bytes=dl.get("size_bytes")
+            ))
+            
+        # Ingest Redirects
+        for rdr in sandbox_result.get("redirects", []):
+            db.add(Redirect(
+                scan_id=scan_id,
+                from_url=rdr.get("from_url"),
+                to_url=rdr.get("to_url"),
+                status_code=rdr.get("status_code")
+            ))
+            
+        # Ingest Evasion Techniques
+        for ev in sandbox_result.get("evasion_techniques", []):
+            db.add(EvasionTechnique(
+                scan_id=scan_id,
+                technique_name=ev.get("technique_name"),
+                evidence_snippet=ev.get("evidence_snippet")
+            ))
+            
+        db.commit()
