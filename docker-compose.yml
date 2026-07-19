@@ -265,6 +265,11 @@ services:
   #    CONTAINERS=1 + POST=1 covers stop/kill on any container reachable on this daemon socket.
   #    Security relies entirely on strict network isolation: ONLY aegis_sandbox_runner sits on
   #    docker_proxy_net, and it is protected by non-root execution and X-Runner-Auth HMAC gating.
+  #
+  #    Production Hardening Note (Finding #3):
+  #    If this blast radius is unacceptable for your threat model, run `aegis_sandbox_runner`
+  #    against a dedicated isolated/rootless Docker daemon or remote Docker context (`DOCKER_HOST`)
+  #    so that compromised runner credentials cannot touch core infrastructure containers.
   # ---------------------------------------------------
   docker_socket_proxy:
     container_name: aegis_socket_proxy
@@ -272,6 +277,12 @@ services:
     environment:
       CONTAINERS: 1
       POST: 1
+      # Explicitly disable container actions not needed for sandbox detonation
+      STOP: 0
+      KILL: 0
+      RESTART: 0
+      PAUSE: 0
+      UNPAUSE: 0
       # AUTH: 0 — Disables Docker /auth endpoint.
       # WARNING: Tecnativa/docker-socket-proxy is an ACL gateway filtering by API endpoint.
       # It does NOT natively enforce HTTP Basic Auth (BASIC_AUTH_INFO is unsupported).

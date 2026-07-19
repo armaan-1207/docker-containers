@@ -34,7 +34,17 @@ class WebSocketManager:
         self.user_connections: Dict[str, Set[WebSocket]] = {}
 
         self._redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        self._sync_redis_pool: Optional[sync_redis.ConnectionPool] = None
         self._listen_tasks: Dict[str, asyncio.Task] = {}
+
+    def _get_sync_client(self) -> sync_redis.Redis:
+        if self._sync_redis_pool is None:
+            self._sync_redis_pool = sync_redis.ConnectionPool.from_url(
+                settings.REDIS_URL,
+                decode_responses=True,
+                max_connections=10,
+            )
+        return sync_redis.Redis(connection_pool=self._sync_redis_pool)
 
     async def connect_browser(self, scan_id: str, websocket: WebSocket) -> None:
         # NOTE: websocket.accept() is called by main.py BEFORE frame-based auth.
@@ -200,16 +210,14 @@ class WebSocketManager:
         Synchronous counterpart to broadcast_risk_update, used inside synchronous
         Celery workers (tasks/risk_fusion.py) to prevent creating and destroying
         asyncio event loops (`asyncio.run`) that corrupt connection pools.
+        Uses a persistent connection pool (`_get_sync_client`) for efficiency across tasks.
         """
         message = json.dumps(payload, default=str)
         try:
-            client = sync_redis.from_url(settings.REDIS_URL, decode_responses=True)
-            try:
-                client.publish(_scan_channel(scan_id), message)
-                if user_id:
-                    client.publish(_user_channel(user_id), message)
-            finally:
-                client.close()
+            client = self._get_sync_client()
+            client.publish(_scan_channel(scan_id), message)
+            if user_id:
+                client.publish(_user_channel(user_id), message)
         except Exception:
             logger.exception("[%s] failed to publish sync risk update to redis", scan_id)
 

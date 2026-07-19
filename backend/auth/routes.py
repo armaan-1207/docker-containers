@@ -185,3 +185,18 @@ def logout(
     """
     revoke_token(token)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_501_NOT_IMPLEMENTED)
+def request_password_reset():
+    """
+    Password reset / account recovery endpoint placeholder (Finding #6 note).
+
+    For an internal analyst tool, user registration and credentials are managed by admins.
+    For customer-facing production deployments, integrate an out-of-band email delivery service
+    (e.g., AWS SES or SendGrid) here to generate and email a time-bounded, single-use reset JWT.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Password reset requires email gateway integration in production.",
+    )

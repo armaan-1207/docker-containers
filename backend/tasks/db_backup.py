@@ -93,6 +93,41 @@ def db_backup_task(self, retention_days: int = 7) -> dict:
             timeout=300,
         )
         logger.info("[db_backup] Database backup created successfully: %s (%d bytes)", dump_path, os.path.getsize(dump_path))
+
+        # Encrypt at rest (finding #4) if BACKUP_ENCRYPTION_KEY is configured
+        enc_key = getattr(settings, "BACKUP_ENCRYPTION_KEY", "")
+        if enc_key:
+            enc_path = f"{dump_path}.enc"
+            logger.info("[db_backup] Encrypting backup file at rest using AES-256-CBC (PBKDF2)")
+            enc_cmd = [
+                "openssl", "enc", "-aes-256-cbc", "-salt", "-pbkdf2",
+                "-in", dump_path, "-out", enc_path, "-pass", f"pass:{enc_key}"
+            ]
+            try:
+                subprocess.run(
+                    enc_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                    timeout=300,
+                )
+                if os.path.exists(dump_path):
+                    os.remove(dump_path)
+                dump_path = enc_path
+                logger.info("[db_backup] Backup encrypted successfully: %s (%d bytes)", dump_path, os.path.getsize(dump_path))
+            except Exception as enc_exc:
+                logger.error("[db_backup] Failed to encrypt backup file: %s", enc_exc)
+                if os.path.exists(dump_path):
+                    try:
+                        os.remove(dump_path)
+                    except OSError:
+                        pass
+                if os.path.exists(enc_path):
+                    try:
+                        os.remove(enc_path)
+                    except OSError:
+                        pass
+                raise self.retry(exc=enc_exc)
     except subprocess.CalledProcessError as exc:
         err_msg = exc.stderr.decode(errors="ignore")[:1000]
         logger.error("[db_backup] pg_dump failed (exit code %d): %s", exc.returncode, err_msg)
@@ -115,7 +150,7 @@ def db_backup_task(self, retention_days: int = 7) -> dict:
     # Prune expired backups
     cutoff_time = time.time() - (retention_days * 86400)
     removed_count = 0
-    for file_path in glob.glob(os.path.join(backup_dir, "aegis_db_*.dump")):
+    for file_path in glob.glob(os.path.join(backup_dir, "aegis_db_*.dump*")):
         try:
             if os.path.getmtime(file_path) < cutoff_time:
                 os.remove(file_path)

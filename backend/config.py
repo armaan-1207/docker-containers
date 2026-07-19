@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     REQUIRE_REAL_CERT: bool = False
     BACKUP_DIR: str = "/backups"
+    BACKUP_ENCRYPTION_KEY: str = ""
 
     @property
     def is_production(self) -> bool:
@@ -309,11 +310,12 @@ if settings.is_production:
             )
 
 hosts = [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
-if not hosts or "*" in hosts:
+_default_internal_hosts = {"localhost", "127.0.0.1", "backend", "nginx", "0.0.0.0"}  # nosec B104
+if not hosts or "*" in hosts or (settings.is_production and all(h.lower() in _default_internal_hosts for h in hosts)):
     if settings.is_production:
         raise RuntimeError(
-            f"Secure-by-default check: ALLOWED_HOSTS is empty or contains wildcard '*' in '{settings.ENVIRONMENT}'. "
-            "Explicitly define allowed domain hostnames in ALLOWED_HOSTS."
+            f"Secure-by-default check: ALLOWED_HOSTS ({settings.ALLOWED_HOSTS!r}) is empty, contains wildcard '*', or only contains default internal hostnames in '{settings.ENVIRONMENT}'. "
+            "Explicitly define your public domain hostname(s) (e.g. api.yourdomain.com) in ALLOWED_HOSTS before deploying to production."
         )
 
 origins = [o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]

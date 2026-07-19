@@ -27,7 +27,9 @@ import sys
 from typing import Optional
 import structlog
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -38,7 +40,7 @@ from auth.jwt import JWTError, decode_access_token
 from config import settings
 from database.database import get_db_session
 from database.models import Scan, User
-from schemas.responses import HealthCheckResponse
+from schemas.responses import HealthCheckResponse, ErrorResponse
 from websocket.websocket_manager import websocket_manager
 
 if settings.is_production:
@@ -142,10 +144,10 @@ _raw_hosts = getattr(settings, "ALLOWED_HOSTS", "") or ""
 _allowed_hosts: list[str] = [
     h.strip() for h in _raw_hosts.split(",") if h.strip()
 ]
-if not _allowed_hosts or "*" in _allowed_hosts:
+if not _allowed_hosts or "*" in _allowed_hosts or (settings.is_production and all(h.lower() in {"localhost", "127.0.0.1", "backend", "nginx", "0.0.0.0"} for h in _allowed_hosts)):  # nosec B104
     if settings.is_production:
         raise RuntimeError(
-            "ALLOWED_HOSTS is empty or contains wildcard '*' while running in production. "
+            f"ALLOWED_HOSTS ({settings.ALLOWED_HOSTS!r}) is empty, contains wildcard '*', or only contains default internal hostnames while running in production. "
             "Explicitly define allowed domain hostnames in ALLOWED_HOSTS for production."
         )
     if not _allowed_hosts:
@@ -169,6 +171,52 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(router)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    detail_str = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+    error_content = ErrorResponse(
+        error=True,
+        status_code=exc.status_code,
+        detail=detail_str,
+        path=request.url.path,
+    ).model_dump(mode="json")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_content,
+        headers=getattr(exc, "headers", None)
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    error_content = ErrorResponse(
+        error=True,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="Validation error: " + "; ".join([f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in exc.errors()]),
+        path=request.url.path,
+    ).model_dump(mode="json")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=error_content,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception during request processing", path=request.url.path)
+    error_content = ErrorResponse(
+        error=True,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Internal Server Error" if settings.is_production else f"Internal Server Error: {str(exc)}",
+        path=request.url.path,
+    ).model_dump(mode="json")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=error_content,
+    )
+
 
 
 @app.get("/", response_model=HealthCheckResponse)
