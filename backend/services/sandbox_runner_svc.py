@@ -40,7 +40,7 @@ _UUID_RE = re.compile(
 
 SANDBOX_IMAGE = os.environ.get(
     "SANDBOX_IMAGE",
-    "aegis-sandbox@sha256:74aaa52be1a8f5a00e462a0b3ec7b2c2dbc108ff46fd02d6fde36de69d12acf5",
+    "aegis-sandbox@sha256:fd0adf42be3bdd40f629e79b2477d52089c775b26c37d2294899e37406a9593a",
 )
 SANDBOX_NETWORK = os.environ.get("SANDBOX_NETWORK", "aegis_sandbox_net")
 SHARED_VOLUME_NAME = os.environ.get("SHARED_SCANS_VOLUME", "aegis_shared_scans")
