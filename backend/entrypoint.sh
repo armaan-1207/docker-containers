@@ -2,7 +2,7 @@
 # =======================================================
 # AEGIS Backend — Container Entrypoint
 # 1. Wait for Postgres to be ready
-# 2. Run SQLAlchemy create_all (create tables if missing)
+# 2. Run Alembic database migrations (upgrade or stamp existing schema)
 # 3. Start Uvicorn
 # =======================================================
 set -e

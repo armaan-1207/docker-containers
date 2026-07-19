@@ -96,8 +96,10 @@ def browser_features_task(self, scan_id: str):
     }
 
     out_path = os.path.join(scan_dir, "browser_features.json")
-    with open(out_path, "w") as f:
+    tmp_path = out_path + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(browser_features, f, indent=2, default=str)
+    os.replace(tmp_path, out_path)  # atomic on Linux — prevents partial-read by downstream tasks
 
     logger.info("[%s] browser_features.json written", scan_id)
     _mark_status(scan_id, "browser_features_done")

@@ -123,8 +123,10 @@ def consistency_task(self, scan_id: str):
         raise self.retry(exc=exc)
 
     report_path = os.path.join(scan_dir, "consistency_report.json")
-    with open(report_path, "w") as f:
+    tmp_path = report_path + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(consistency_report, f, indent=2, default=str)
+    os.replace(tmp_path, report_path)  # atomic on Linux — prevents partial-read by downstream tasks
 
     logger.info("[%s] consistency_report.json written", scan_id)
     _mark_status(scan_id, "consistency_done")

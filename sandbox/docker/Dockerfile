@@ -38,7 +38,8 @@ COPY backend/ ./backend/
 # capabilities this container deliberately doesn't have; the
 # container/non-root-user boundary is the real isolation layer here,
 # same tradeoff Playwright's own official Docker images make.
-RUN useradd --create-home --shell /bin/bash sandbox \
+RUN groupadd --gid 1001 sandbox \
+    && useradd --uid 1001 --gid sandbox --create-home --shell /bin/bash sandbox \
     && mkdir -p /app/output \
     && chown -R sandbox:sandbox /app
 

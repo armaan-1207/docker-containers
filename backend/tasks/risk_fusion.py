@@ -178,8 +178,10 @@ def risk_fusion_task(self, scan_id: str):
     risk_report["scan_id"] = scan_id
 
     report_path = os.path.join(scan_dir, "risk_report.json")
-    with open(report_path, "w") as f:
+    tmp_path = report_path + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(risk_report, f, indent=2, default=str)
+    os.replace(tmp_path, report_path)  # atomic on Linux — prevents partial-read by late-joining WebSocket clients
 
     # Security finding #13 fix: was set() with no TTL (infinite persistence).
     # Use setex(3600) so Redis automatically evicts the entry after 1 hour.

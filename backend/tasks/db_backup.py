@@ -53,7 +53,12 @@ def db_backup_task(self, retention_days: int = 7) -> dict:
         logger.error("[db_backup] AEGIS_DB_PASSWORD not set — cannot authenticate to postgres")
         raise RuntimeError("AEGIS_DB_PASSWORD is empty")
 
-    pgpass_path = os.path.join(os.path.expanduser("~"), ".pgpass")
+    # Write .pgpass to /tmp (tmpfs — auto-wiped on container restart) rather than
+    # the home directory. If the Celery worker receives SIGKILL mid-task, the
+    # `finally` block does not execute and a .pgpass in ~ would persist across
+    # restarts with the plaintext password visible on the filesystem.
+    # Using the process PID makes the path unique across concurrent task executions.
+    pgpass_path = f"/tmp/.pgpass_{os.getpid()}"  # nosec B108
     try:
         with open(pgpass_path, "w", encoding="utf-8") as f:
             f.write(f"postgres:5432:aegis_db:aegis_user:{db_password}\n")

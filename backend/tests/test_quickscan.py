@@ -113,4 +113,4 @@ async def test_run_quickscan_real_score_is_cached():
             
             # Redis setex SHOULD be called because is_placeholder=False
             mock_redis.setex.assert_called_once()
-            assert mock_redis.setex.call_args[0][0] == "quickscan:realsite.com"
+            assert mock_redis.setex.call_args[0][0] == "quickscan:url:https://realsite.com/"

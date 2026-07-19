@@ -480,7 +480,7 @@ services:
     build:
       context: ./sandbox
       dockerfile: docker/Dockerfile
-    image: ${SANDBOX_DEBUG_IMAGE:-aegis-sandbox:v1.0.0}
+    image: ${SANDBOX_DEBUG_IMAGE:-aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c}
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # --- Security notice (Volume Scoping & Isolation - Finding #3) ---

@@ -49,8 +49,23 @@ def _domain_from_url(url: str) -> str:
     return netloc.split(":")[0].lower()
 
 
-def _cache_key(domain: str) -> str:
-    return f"quickscan:{domain}"
+def _normalize_url_for_cache(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.netloc and not parsed.scheme:
+        parsed = urlparse("http://" + url)
+    scheme = (parsed.scheme or "http").lower()
+    netloc = (parsed.netloc or "").lower()
+    if "@" in netloc:
+        netloc = netloc.split("@")[-1]
+    path = parsed.path or "/"
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"{scheme}://{netloc}{path}{query}"
+
+
+def _cache_key(url: str) -> str:
+    return f"quickscan:url:{_normalize_url_for_cache(url)}"
 
 
 async def run_quickscan(payload: QuickScanRequest, user, db) -> QuickScanResponse:
@@ -60,7 +75,7 @@ async def run_quickscan(payload: QuickScanRequest, user, db) -> QuickScanRespons
     # ── Redis cache check ──────────────────────────────────────────────────
     # Only real verdicts are stored here (see caching logic below), so a
     # cache hit always contains a trustworthy is_placeholder=False result.
-    cached_raw = _redis_client.get(_cache_key(domain))
+    cached_raw = _redis_client.get(_cache_key(url))
     if cached_raw:
         cached = json.loads(cached_raw)
         cached["url"] = url
@@ -119,7 +134,7 @@ async def run_quickscan(payload: QuickScanRequest, user, db) -> QuickScanRespons
     # Only cache when is_placeholder is False (real model verdict).
     if not is_placeholder:
         _redis_client.setex(
-            _cache_key(domain),
+            _cache_key(url),
             _CACHE_TTL_SECONDS,
             response.model_dump_json(),
         )
@@ -127,7 +142,7 @@ async def run_quickscan(payload: QuickScanRequest, user, db) -> QuickScanRespons
         logger.debug(
             "[quickscan] Skipping Redis cache for %s — is_placeholder=True "
             "(random score must not be persisted as a real verdict)",
-            domain,
+            url,
         )
 
     return response

@@ -280,8 +280,10 @@ def sandbox_analysis_task(self, scan_id: str):
     source_json_path = sandbox_result.pop("_source_json_path", None)
 
     metadata_path = os.path.join(scan_dir, "sandbox_metadata.json")
-    with open(metadata_path, "w") as f:
+    tmp_path = metadata_path + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(sandbox_result, f, indent=2, default=str)
+    os.replace(tmp_path, metadata_path)  # atomic on Linux — prevents partial-read by downstream tasks
 
     try:
         _save_telemetry_to_postgres(scan_id, sandbox_result)

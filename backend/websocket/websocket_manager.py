@@ -176,13 +176,16 @@ class WebSocketManager:
 
     async def _scan_keys(self, pattern: str) -> list[str]:
         keys = []
-        cursor = "0"
-        while cursor != 0:
+        cursor = 0
+        while True:
             cursor, partial = await self._redis.scan(cursor=cursor, match=pattern, count=500)
             if isinstance(cursor, bytes):
-                cursor = cursor.decode()
-            cursor = int(cursor)
+                cursor = int(cursor.decode())
+            else:
+                cursor = int(cursor)
             keys.extend(partial)
+            if cursor == 0:
+                break
         return keys
 
     async def reconcile_counters(self) -> None:

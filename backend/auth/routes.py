@@ -139,6 +139,19 @@ def login(
         record_failed_login(email, client_ip)
         raise invalid_credentials
 
+    # is_active check BEFORE resetting lockout counters — an inactive user
+    # with a known correct password must not be able to reset their lockout
+    # counter (which would give them unlimited brute-force attempts once they
+    # somehow become active again, and leaks that their password is correct).
+    if hasattr(user, "is_active") and not user.is_active:
+        # Return 401 (not 400) to avoid leaking that the account exists
+        # and that the correct password was supplied.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     reset_failed_login(email, client_ip)
 
     # Automatic hash rotation: upgrade legacy hash to SHA-256 pre-hashed format on successful login
@@ -151,9 +164,6 @@ def login(
             "Upgraded hash automatically. Monitor metric to disable ALLOW_LEGACY_BCRYPT once zero.",
             user.email,
         )
-
-    if hasattr(user, "is_active") and not user.is_active:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
 
     access_token = create_access_token(data={"sub": user.id})
     return TokenResponse(access_token=access_token)

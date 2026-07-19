@@ -103,7 +103,7 @@ async def verify_host_firewall_and_image():
             "--network", SANDBOX_NETWORK,
             "--cap-drop=ALL",
             "--security-opt", "no-new-privileges:true",
-            "busybox:1.36-uclibc",
+            "busybox:1.36-uclibc@sha256:4b494676189cfad37ab1354363297a7e8bfdb3b4df9d1cf33efcddce02d0ecb2",
             "sh", "-c", "nc -z -w 2 169.254.169.254 80 2>/dev/null"
         ]
         proc = await asyncio.create_subprocess_exec(
