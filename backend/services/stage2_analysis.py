@@ -102,7 +102,7 @@ def _decode_and_validate_image(b64_string: str) -> bytes:
     return image_bytes
 
 
-async def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Response:
+def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Response:
     url = str(payload.url)
 
     # ── Validate and decode image before touching the database ───────────

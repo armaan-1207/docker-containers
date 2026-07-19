@@ -11,6 +11,7 @@ from typing import Dict, Optional, Set
 import uuid
 
 from fastapi import WebSocket, status
+import redis as sync_redis
 from redis import asyncio as aioredis
 
 from config import settings
@@ -173,6 +174,26 @@ class WebSocketManager:
                 await self._redis.publish(_user_channel(user_id), message)
         except Exception:
             logger.exception("[%s] failed to publish risk update to redis", scan_id)
+
+    def broadcast_risk_update_sync(
+        self, scan_id: str, payload: dict, user_id: Optional[str] = None
+    ) -> None:
+        """
+        Synchronous counterpart to broadcast_risk_update, used inside synchronous
+        Celery workers (tasks/risk_fusion.py) to prevent creating and destroying
+        asyncio event loops (`asyncio.run`) that corrupt connection pools.
+        """
+        message = json.dumps(payload, default=str)
+        try:
+            client = sync_redis.from_url(settings.REDIS_URL, decode_responses=True)
+            try:
+                client.publish(_scan_channel(scan_id), message)
+                if user_id:
+                    client.publish(_user_channel(user_id), message)
+            finally:
+                client.close()
+        except Exception:
+            logger.exception("[%s] failed to publish sync risk update to redis", scan_id)
 
     async def _scan_keys(self, pattern: str) -> list[str]:
         keys = []

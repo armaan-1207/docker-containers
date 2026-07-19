@@ -43,7 +43,7 @@ from celery_worker import celery
 from config import settings
 from tasks import _UUID_RE
 from database.database import SessionLocal
-from database.models import Incident, IOC, Scan
+from database.models import Scan
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -162,21 +162,10 @@ def file_cleanup_task(self, retention_days: int = 14) -> dict:
     cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=retention_days)
     try:
         with SessionLocal() as db:
-            # Finding #1: Query.delete() bypasses ORM cascades. Explicitly delete child
-            # records (IOCs and Incidents) first to guarantee no foreign-key violations.
-            expired_scan_ids = [
-                s[0] for s in db.query(Scan.id).filter(Scan.created_at <= cutoff_datetime).all()
-            ]
-            if expired_scan_ids:
-                expired_incident_ids = [
-                    i[0] for i in db.query(Incident.id).filter(Incident.scan_id.in_(expired_scan_ids)).all()
-                ]
-                if expired_incident_ids:
-                    db.query(IOC).filter(IOC.incident_id.in_(expired_incident_ids)).delete(synchronize_session=False)
-                    db.query(Incident).filter(Incident.id.in_(expired_incident_ids)).delete(synchronize_session=False)
-                deleted_count = db.query(Scan).filter(Scan.id.in_(expired_scan_ids)).delete(synchronize_session=False)
-                db.commit()
-                db_records_removed = deleted_count
+            # Rely on DB-level ON DELETE CASCADE (configured via migration) to prune child Incident and IOC rows
+            deleted_count = db.query(Scan).filter(Scan.created_at <= cutoff_datetime).delete(synchronize_session=False)
+            db.commit()
+            db_records_removed = deleted_count
             logger.info("[file_cleanup] Purged %d old scans from database.", db_records_removed)
     except Exception as e:
         logger.error("[file_cleanup] Failed to purge old scans from database: %s", e)

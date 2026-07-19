@@ -68,7 +68,7 @@ def _cache_key(url: str) -> str:
     return f"quickscan:url:{_normalize_url_for_cache(url)}"
 
 
-async def run_quickscan(payload: QuickScanRequest, user, db) -> QuickScanResponse:
+def run_quickscan(payload: QuickScanRequest, user, db) -> QuickScanResponse:
     url = str(payload.url)
     domain = _domain_from_url(url)
 

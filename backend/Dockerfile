@@ -34,8 +34,6 @@ WORKDIR /app
 # backend/Dockerfile.worker)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
-    tesseract-ocr \
-    libzbar0 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -47,7 +45,7 @@ COPY --chown=aegis:aegis . .
 
 # Shared volume mount point — Backend writes screenshots here,
 # Celery worker and Sandbox container read from this same volume.
-RUN mkdir -p /shared/scans && chown -R aegis:aegis /shared/scans && chmod 1777 /shared/scans
+RUN mkdir -p /shared/scans && chown -R aegis:aegis /shared/scans && chmod 0770 /shared/scans
 VOLUME ["/shared/scans"]
 
 # Models directory (LightGBM .pkl lives here)
@@ -72,4 +70,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=5 \
 
 # entrypoint: waits for Postgres, runs db init, then execs CMD
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--log-level", "info"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--log-level", "info", "--proxy-headers", "--forwarded-allow-ips=*"]

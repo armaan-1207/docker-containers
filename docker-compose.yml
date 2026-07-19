@@ -117,6 +117,8 @@ services:
       --port 8000
       --workers 2
       --log-level info
+      --proxy-headers
+      --forwarded-allow-ips='*'
     expose:
       - "8000"
     healthcheck:
@@ -140,6 +142,7 @@ services:
   redis:
     container_name: aegis_redis
     image: redis:7.2-alpine@sha256:dfa18828cbc07b3ae6a95ec7343f6c214fdee2d836197b4be8e9904420762cd8
+    user: "999"
     command: >
       redis-server
       --save 60 1
@@ -158,6 +161,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    <<: *default-resources
 
   redis_security:
     container_name: aegis_redis_security

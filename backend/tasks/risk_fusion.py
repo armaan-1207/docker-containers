@@ -13,7 +13,6 @@ Security hardening:
     the quickscan service's caching policy).
 """
 
-import asyncio
 import json
 import logging
 import os
@@ -99,26 +98,7 @@ def _get_cyberintel(scan_id: str, browser_features: dict) -> dict:
     return cyberintel
 
 
-def _run_coroutine_sync(coro):
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-
-    result_holder = {}
-
-    def _runner():
-        result_holder["result"] = asyncio.run(coro)
-
-    import threading
-    t = threading.Thread(target=_runner, daemon=True)
-    t.start()
-    t.join()
-    return result_holder.get("result")
-
-
 def _push_websocket_update(scan_id: str, payload: dict) -> None:
-
     user_id = None
     try:
         user_id = _get_scan_fields(scan_id).get("user_id")
@@ -126,7 +106,7 @@ def _push_websocket_update(scan_id: str, payload: dict) -> None:
         logger.exception("[%s] Could not look up user_id for dashboard broadcast", scan_id)
 
     try:
-        _run_coroutine_sync(websocket_manager.broadcast_risk_update(scan_id, payload, user_id=user_id))
+        websocket_manager.broadcast_risk_update_sync(scan_id, payload, user_id=user_id)
     except Exception:
         logger.exception("[%s] WebSocket push failed (non-fatal)", scan_id)
 

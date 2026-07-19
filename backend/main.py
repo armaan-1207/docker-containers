@@ -30,6 +30,7 @@ import structlog
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from api.routes import router
 from auth.routes import router as auth_router
@@ -155,6 +156,10 @@ app.add_middleware(
     allowed_hosts=_allowed_hosts,
 )
 app.add_middleware(
+    ProxyHeadersMiddleware,
+    trusted_hosts="*",
+)
+app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
@@ -196,6 +201,9 @@ async def _ws_frame_auth(websocket: WebSocket) -> Optional[str]:
         logger.warning("WebSocket auth frame not received within %.1fs — closing", _WS_AUTH_TIMEOUT_SECONDS)
         return None
     except WebSocketDisconnect:
+        return None
+    except Exception as exc:
+        logger.warning("WebSocket auth frame read failed (%s) — closing", type(exc).__name__)
         return None
 
     try:

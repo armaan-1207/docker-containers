@@ -68,6 +68,7 @@ def db_backup_task(self, retention_days: int = 7) -> dict:
         raise RuntimeError("Could not secure .pgpass file")
 
     env = os.environ.copy()
+    env["PGPASSFILE"] = pgpass_path
     
     # Use pg_dump custom format (-F c) for compressed, restorable archives
     cmd = [

@@ -51,13 +51,13 @@ def _sanitize_html_content(html: str) -> str:
 
 
 @router.post("/quick", response_model=QuickScanResponse)
-async def quick_scan(
+def quick_scan(
     payload: QuickScanRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     try:
-        result = await run_quickscan(payload=payload, user=current_user, db=db)
+        result = run_quickscan(payload=payload, user=current_user, db=db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception:
@@ -76,7 +76,7 @@ async def quick_scan(
 
 
 @router.post("/stage2", response_model=Stage2Response)
-async def stage2_scan(
+def stage2_scan(
     payload: Stage2Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -94,7 +94,7 @@ async def stage2_scan(
         )
 
     try:
-        result = await run_stage2_analysis(payload=payload, user=current_user, db=db)
+        result = run_stage2_analysis(payload=payload, user=current_user, db=db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception:
@@ -110,7 +110,7 @@ async def stage2_scan(
 
 
 @router.get("/{scan_id}")
-async def get_scan(
+def get_scan(
     scan_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -149,7 +149,7 @@ async def get_scan(
 
 
 @router.get("/{scan_id}/artifacts/{artifact_name}")
-async def get_scan_artifact(
+def get_scan_artifact(
     scan_id: str,
     artifact_name: str,
     sanitized: bool = Query(True, description="Whether to sanitize HTML artifacts against XSS before serving"),
