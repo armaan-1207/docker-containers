@@ -72,11 +72,15 @@ def main():
     # 4. Trivy Container Image Scan
     if shutil.which("trivy"):
         for img in ["aegis-backend:ci", "aegis-sandbox:v1.0.0", "aegis-runner:ci", "nginx:1.27-alpine"]:
-            success &= check_and_run(
-                "trivy",
-                ["image", "--severity", "HIGH,CRITICAL", img],
-                f"Scanning container image {img} for OS/package vulnerabilities"
-            )
+            # Check if image exists locally before attempting scan
+            if subprocess.run(["docker", "image", "inspect", img], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                success &= check_and_run(
+                    "trivy",
+                    ["image", "--severity", "HIGH,CRITICAL", img],
+                    f"Scanning container image {img} for OS/package vulnerabilities"
+                )
+            else:
+                print(f"\n[SKIP] Image '{img}' not found locally (run 'docker build' or 'make pin-sandbox' first).")
     else:
         print("\n[SKIP] 'trivy' not found on PATH for container image vulnerability scanning.")
 

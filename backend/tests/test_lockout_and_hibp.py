@@ -78,7 +78,7 @@ def test_check_pwned_password_k_anonymity_match():
     # Suppose sha1 of "password123" has suffix "A1C3E..."
     # We mock the return line to match whatever suffix hashlib computes for "testpwned"
     import hashlib
-    sha1 = hashlib.sha1(b"testpwned").hexdigest().upper()
+    sha1 = hashlib.sha1(b"testpwned").hexdigest().upper()  # nosec B324
     prefix, suffix = sha1[:5], sha1[5:]
 
     mock_response.read.return_value = f"00000000000000000000000000000000000:10\n{suffix}:1337\n11111111111111111111111111111111111:5\n".encode("utf-8")

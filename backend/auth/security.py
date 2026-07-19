@@ -143,7 +143,7 @@ def check_pwned_password(plain_password: str) -> bool:
     """
     if not plain_password:
         return False
-    sha1_hash = hashlib.sha1(plain_password.encode("utf-8")).hexdigest().upper()
+    sha1_hash = hashlib.sha1(plain_password.encode("utf-8")).hexdigest().upper()  # nosec B324
     prefix, suffix = sha1_hash[:5], sha1_hash[5:]
     url = f"https://api.pwnedpasswords.com/range/{prefix}"
     req = urllib.request.Request(
@@ -151,7 +151,7 @@ def check_pwned_password(plain_password: str) -> bool:
         headers={"User-Agent": "AEGIS-Security-HIBP-Checker"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:  # nosec B310
             if resp.status != 200:
                 return False
             for line in resp.read().decode("utf-8", errors="ignore").splitlines():

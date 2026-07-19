@@ -954,323 +954,323 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
                 page.on("websocket", lambda ws: ws_count.__setitem__("n", ws_count["n"] + 1))
                 page.on("download", lambda d: downloads.append(d))
 
-            main_response = None
-            load_error = None
-            try:
-                main_response = await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
-                mark("initial navigation complete")
-            except Exception as e:
-                load_error = str(e)
-                mark(f"navigation error: {e}")
-                logger.warning("Navigation failed for %s: %s", url, e, exc_info=True)
-
-            challenge_detected, challenge_resolved = False, True
-            # No human/VNC in this simplified, headless-only container —
-            # this is now a short SELF-CLEAR-ONLY wait (some lightweight JS
-            # "checking your browser" gates resolve on their own within a
-            # few seconds with no interaction at all). Anything that doesn't
-            # self-clear is reported via unresolved_interactivity for
-            # whatever consumes this container's output to act on. Not
-            # gated on main_response — page.content() can still work on a
-            # partially-loaded page, and a challenge gate is exactly the
-            # kind of thing that might cause page.goto() to appear to hang.
-            challenge_detected, challenge_resolved = await wait_for_challenge_to_clear(
-                page, challenge_wait_seconds
-            )
-            if challenge_detected:
-                mark(f"bot-challenge detected; self-cleared={challenge_resolved}")
-
-            if simulate_human:
-                await simulate_human_behavior(page)
-                mark("human-behavior simulation done")
-
-            await page.wait_for_timeout(1000)
-
-            scan_end_time = now_iso() if main_response is not None else None
-
-            final_url = None
-            chain = []
-            dom = {}
-            counters = {}
-            inline_script_text = ""
-            has_meta_refresh = False
-            sec = None
-            main_headers = {}
-
-            # These genuinely need a valid response object -- there's no
-            # meaningful fallback for a redirect chain or TLS/header details
-            # from a navigation that never got a response at all.
-            if main_response is not None:
-                final_url = page.url
-
-                req = main_response.request
-                seen = set()
-                while req is not None:
-                    if req.url not in seen:
-                        chain.append(req.url)
-                        seen.add(req.url)
-                    req = req.redirected_from
-                chain.reverse()
-
+                main_response = None
+                load_error = None
                 try:
-                    sec = await main_response.security_details()
+                    main_response = await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                    mark("initial navigation complete")
                 except Exception as e:
-                    logger.debug("security_details unavailable: %s", e)
+                    load_error = str(e)
+                    mark(f"navigation error: {e}")
+                    logger.warning("Navigation failed for %s: %s", url, e, exc_info=True)
 
-                try:
-                    main_headers = {k.lower(): v for k, v in (await main_response.all_headers()).items()}
-                except Exception as e:
-                    logger.debug("response headers unavailable: %s", e)
+                challenge_detected, challenge_resolved = False, True
+                # No human/VNC in this simplified, headless-only container —
+                # this is now a short SELF-CLEAR-ONLY wait (some lightweight JS
+                # "checking your browser" gates resolve on their own within a
+                # few seconds with no interaction at all). Anything that doesn't
+                # self-clear is reported via unresolved_interactivity for
+                # whatever consumes this container's output to act on. Not
+                # gated on main_response — page.content() can still work on a
+                # partially-loaded page, and a challenge gate is exactly the
+                # kind of thing that might cause page.goto() to appear to hang.
+                challenge_detected, challenge_resolved = await wait_for_challenge_to_clear(
+                    page, challenge_wait_seconds
+                )
+                if challenge_detected:
+                    mark(f"bot-challenge detected; self-cleared={challenge_resolved}")
 
-            # DOM snapshot and screenshots are NOT gated on main_response
-            # anymore. A page.goto() timeout means the FULL page lifecycle
-            # (networkidle) never completed -- it does NOT mean the page
-            # object has nothing rendered. A stealthy phishing kit that
-            # intentionally lags asset loading to exhaust a scanner's
-            # timeout would previously leave this container with zero
-            # captured data on exactly the pages most worth capturing. Both
-            # blocks already have their own try/except, so a genuinely blank
-            # page just produces empty-but-present fields, not a crash.
-            if page is not None:
-                try:
-                    dom = await page.evaluate(DOM_SNAPSHOT_SCRIPT)
-                    counters = dom.pop("counters", {})
-                    inline_script_text = dom.pop("inline_script_text", "")
-                    has_meta_refresh = dom.pop("has_meta_refresh", False)
-                    dom.pop("script_count", None)  # denominator only, not stored
-                    mark("DOM snapshot captured")
-                    if main_response is None:
-                        mark("DOM snapshot captured from a PARTIAL/failed navigation "
-                             "-- treat with extra caution, page never reached networkidle")
-                except Exception as e:
-                    mark(f"DOM snapshot failed: {e}")
-                    logger.warning("DOM snapshot failed: %s", e, exc_info=True)
-                if final_url is None:
-                    # page.url still reflects wherever navigation got to,
-                    # even on a timeout -- worth recording rather than
-                    # leaving final_url null when we might know it.
+                if simulate_human:
+                    await simulate_human_behavior(page)
+                    mark("human-behavior simulation done")
+
+                await page.wait_for_timeout(1000)
+
+                scan_end_time = now_iso() if main_response is not None else None
+
+                final_url = None
+                chain = []
+                dom = {}
+                counters = {}
+                inline_script_text = ""
+                has_meta_refresh = False
+                sec = None
+                main_headers = {}
+
+                # These genuinely need a valid response object -- there's no
+                # meaningful fallback for a redirect chain or TLS/header details
+                # from a navigation that never got a response at all.
+                if main_response is not None:
+                    final_url = page.url
+
+                    req = main_response.request
+                    seen = set()
+                    while req is not None:
+                        if req.url not in seen:
+                            chain.append(req.url)
+                            seen.add(req.url)
+                        req = req.redirected_from
+                    chain.reverse()
+
                     try:
-                        final_url = page.url
-                    except Exception:
-                        pass
+                        sec = await main_response.security_details()
+                    except Exception as e:
+                        logger.debug("security_details unavailable: %s", e)
 
-            # M2 FIX: derive protocol_used from the FINAL url (after any
-            # redirects), not the originally-requested one. An http:// ->
-            # https:// redirect (extremely common) was previously reported
-            # as HTTP even though the connection actually ended up on
-            # HTTPS. Falls back to the original `url` only when navigation
-            # never produced a final URL at all (e.g. a total failure).
-            protocol_used = "HTTPS" if (final_url or url).lower().startswith("https") else "HTTP"
-            certificate_present = bool(sec)
-            certificate_issuer = sec.get("issuer") if sec else None
-            tls_version = sec.get("protocol") if sec else None
-            certificate_issued_date = None
-            if sec:
-                valid_from = sec.get("validFrom")
-                if valid_from:
-                    certificate_issued_date = datetime.fromtimestamp(
-                        valid_from, tz=timezone.utc
-                    ).isoformat()
+                    try:
+                        main_headers = {k.lower(): v for k, v in (await main_response.all_headers()).items()}
+                    except Exception as e:
+                        logger.debug("response headers unavailable: %s", e)
 
-            home_path = os.path.join(tempfile.gettempdir(), f"{scan_id}_home.png")
-            full_path = os.path.join(tempfile.gettempdir(), f"{scan_id}_full.png")
-            # Explicit 5s timeout on each call: Playwright's default is 30s
-            # and includes waiting for custom web fonts to finish loading. A
-            # page whose fonts come from a CDN our own SSRF guard blocks (or
-            # that's just slow/unreachable) would otherwise hang for up to
-            # 30s on EACH of the two calls below.
-            #
-            # Captured independently rather than in one shared try/except —
-            # a full-page screenshot timing out shouldn't discard a
-            # homepage screenshot that already succeeded and exists on disk.
-            try:
-                await page.screenshot(path=home_path, timeout=5000)
-            except Exception as e:
-                home_path = None
-                mark(f"homepage screenshot failed: {e}")
-                logger.warning("Homepage screenshot failed: %s", e, exc_info=True)
+                # DOM snapshot and screenshots are NOT gated on main_response
+                # anymore. A page.goto() timeout means the FULL page lifecycle
+                # (networkidle) never completed -- it does NOT mean the page
+                # object has nothing rendered. A stealthy phishing kit that
+                # intentionally lags asset loading to exhaust a scanner's
+                # timeout would previously leave this container with zero
+                # captured data on exactly the pages most worth capturing. Both
+                # blocks already have their own try/except, so a genuinely blank
+                # page just produces empty-but-present fields, not a crash.
+                if page is not None:
+                    try:
+                        dom = await page.evaluate(DOM_SNAPSHOT_SCRIPT)
+                        counters = dom.pop("counters", {})
+                        inline_script_text = dom.pop("inline_script_text", "")
+                        has_meta_refresh = dom.pop("has_meta_refresh", False)
+                        dom.pop("script_count", None)  # denominator only, not stored
+                        mark("DOM snapshot captured")
+                        if main_response is None:
+                            mark("DOM snapshot captured from a PARTIAL/failed navigation "
+                                 "-- treat with extra caution, page never reached networkidle")
+                    except Exception as e:
+                        mark(f"DOM snapshot failed: {e}")
+                        logger.warning("DOM snapshot failed: %s", e, exc_info=True)
+                    if final_url is None:
+                        # page.url still reflects wherever navigation got to,
+                        # even on a timeout -- worth recording rather than
+                        # leaving final_url null when we might know it.
+                        try:
+                            final_url = page.url
+                        except Exception:
+                            pass
 
-            try:
-                await page.screenshot(path=full_path, full_page=True, timeout=5000)
-            except Exception as e:
-                full_path = None
-                mark(f"full-page screenshot failed: {e}")
-                logger.warning("Full-page screenshot failed: %s", e, exc_info=True)
+                # M2 FIX: derive protocol_used from the FINAL url (after any
+                # redirects), not the originally-requested one. An http:// ->
+                # https:// redirect (extremely common) was previously reported
+                # as HTTP even though the connection actually ended up on
+                # HTTPS. Falls back to the original `url` only when navigation
+                # never produced a final URL at all (e.g. a total failure).
+                protocol_used = "HTTPS" if (final_url or url).lower().startswith("https") else "HTTP"
+                certificate_present = bool(sec)
+                certificate_issuer = sec.get("issuer") if sec else None
+                tls_version = sec.get("protocol") if sec else None
+                certificate_issued_date = None
+                if sec:
+                    valid_from = sec.get("validFrom")
+                    if valid_from:
+                        certificate_issued_date = datetime.fromtimestamp(
+                            valid_from, tz=timezone.utc
+                        ).isoformat()
 
-            if home_path or full_path:
-                mark("screenshots captured" if main_response is not None
-                     else "screenshots captured from a PARTIAL/failed navigation")
-
-            # Opt-in active probe — runs AFTER passive metrics/screenshots are
-            # captured, so it can never contaminate them with post-submit
-            # state. Not gated on main_response: probe_credential_redirect
-            # already safely no-ops if it finds no password field, and a
-            # partial/timed-out page may still have rendered a real one.
-            if probe_credentials:
-                credential_probe_result = await probe_credential_redirect(page)
-                mark(f"credential-redirect probe: {credential_probe_result.get('attempted')}")
-
-            b64_pattern = re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")
-            base64_encoded_script_count = len(b64_pattern.findall(inline_script_text))
-
-            redirect_trigger_types = []
-            if has_meta_refresh:
-                redirect_trigger_types.append("meta_refresh")
-            if JS_REDIRECT_PATTERN.search(inline_script_text):
-                redirect_trigger_types.append("js_redirect")
-
-            js_obfuscation_score = compute_js_obfuscation_score(inline_script_text)
-
-            qr_code_detected = None
-            qr_linked_scan = None
-            if QR_AVAILABLE and full_path:
-                qr_code_detected, qr_urls = detect_qr(full_path)
-                if qr_urls and qr_recursion_depth < max_qr_recursion_depth:
-                    # Recurse on at most the first decoded URL — a page with
-                    # several QR codes shouldn't multiply detonation cost
-                    # linearly; one extra hop is enough to catch the common
-                    # "QR points at the real phishing page" pattern.
-                    qr_target = qr_urls[0]
-                    mark(f"QR code decoded to {qr_target}; recursing (depth {qr_recursion_depth + 1})")
-                    qr_linked_scan = await scan_url(
-                        qr_target,
-                        timeout_ms=timeout_ms,
-                        viewport=viewport,
-                        proxy=proxy,
-                        egress_proxy_port=egress_proxy_port,
-                        simulate_human=simulate_human,
-                        allow_private_targets=allow_private_targets,
-                        browser=browser,  # reuse the same (possibly pooled) browser
-                        qr_recursion_depth=qr_recursion_depth + 1,
-                        max_qr_recursion_depth=max_qr_recursion_depth,
-                    )
-                elif qr_urls:
-                    mark(f"QR code decoded to a URL but max recursion depth "
-                         f"({max_qr_recursion_depth}) already reached; not following it")
-
-            brand_match = None
-            if _BRAND_MATCHER is not None and full_path and main_response is not None:
+                home_path = os.path.join(tempfile.gettempdir(), f"{scan_id}_home.png")
+                full_path = os.path.join(tempfile.gettempdir(), f"{scan_id}_full.png")
+                # Explicit 5s timeout on each call: Playwright's default is 30s
+                # and includes waiting for custom web fonts to finish loading. A
+                # page whose fonts come from a CDN our own SSRF guard blocks (or
+                # that's just slow/unreachable) would otherwise hang for up to
+                # 30s on EACH of the two calls below.
+                #
+                # Captured independently rather than in one shared try/except —
+                # a full-page screenshot timing out shouldn't discard a
+                # homepage screenshot that already succeeded and exists on disk.
                 try:
-                    brand_match = _BRAND_MATCHER.match(full_path)
-                    if brand_match:
-                        mark(f"brand-impersonation match: {brand_match['brand']} "
-                             f"(similarity {brand_match['similarity']})")
+                    await page.screenshot(path=home_path, timeout=5000)
                 except Exception as e:
-                    logger.warning("Brand matching failed during scan of %s: %s", full_path, e)
-                    brand_match = None
-            elif _BRAND_MATCHER is not None and full_path and main_response is None:
-                mark("brand-impersonation check skipped -- screenshot is from a "
-                     "partial/failed navigation (chrome-error page), not real content")
+                    home_path = None
+                    mark(f"homepage screenshot failed: {e}")
+                    logger.warning("Homepage screenshot failed: %s", e, exc_info=True)
 
-            requests = [e for e in network_events if e["type"] == "request"]
-            responses = [e for e in network_events if e["type"] == "response"]
-            total_request_count = len(requests)
-
-            req_domains = {domain_of(e["url"]) for e in requests if domain_of(e["url"])}
-            unique_requested_domains = len(req_domains)
-            page_domain = domain_of(final_url or url)
-            third_party_domain_count = len([d for d in req_domains if d != page_domain])
-
-            xhr_request_count = len([e for e in requests if e["resource_type"] in ("xhr", "fetch")])
-            websocket_connection_count = ws_count["n"]
-
-            popup_count, new_tab_count = classify_window_opens(window_open_events)
-
-            downloads_rows = []
-            for d in downloads:
-                size = None
-                quarantined_path = None
                 try:
-                    # Defensive: Path() wrap around d.path()'s result.
-                    # Playwright's async API is typed to return
-                    # Optional[pathlib.Path] here at the version pinned
-                    # in docker/requirements.txt, so this is a no-op
-                    # today (Path(existing_path_obj) is idempotent) --
-                    # it's just cheap insurance against a future
-                    # Playwright version changing that return type to a
-                    # plain str, which would otherwise make .stat() /
-                    # .unlink() below raise AttributeError.
-                    raw_path = await d.path()
-                    tmp_path = Path(raw_path) if raw_path else None
-                    if tmp_path:
-                        size = tmp_path.stat().st_size
-                        if size <= MAX_DOWNLOAD_BYTES:
-                            os.makedirs(DOWNLOAD_QUARANTINE_DIR, exist_ok=True)
-                            safe_name = os.path.basename(getattr(d, "suggested_filename", "") or "download")[:128]
-                            quarantined_path = os.path.join(
-                                DOWNLOAD_QUARANTINE_DIR,
-                                f"{scan_id}_{uuid.uuid4().hex[:8]}_{safe_name}",
-                            )
-                            shutil.move(str(tmp_path), quarantined_path)
-                        else:
-                            # Over the cap: keep the recorded size as a signal,
-                            # but don't let a malicious page fill the disk.
-                            tmp_path.unlink(missing_ok=True)
-                            mark(f"download over size cap discarded ({size} bytes)")
+                    await page.screenshot(path=full_path, full_page=True, timeout=5000)
                 except Exception as e:
-                    logger.warning("Download handling failed for %s: %s",
-                                    getattr(d, "suggested_filename", "?"), e, exc_info=True)
-                safe_name = os.path.basename(getattr(d, "suggested_filename", "") or "download")[:128]
-                downloads_rows.append({
-                    "downloaded_id": str(uuid.uuid4()),
-                    "scan_id": scan_id,
-                    "file_name": safe_name,
-                    "file_size": size,
-                    # Ops/debug field, not part of the DOWNLOADS table schema —
-                    # drop this key before inserting if your DB column set is strict.
-                    "quarantined_path": quarantined_path,
-                })
-            if downloads_rows:
-                mark(f"{len(downloads_rows)} download(s) captured")
+                    full_path = None
+                    mark(f"full-page screenshot failed: {e}")
+                    logger.warning("Full-page screenshot failed: %s", e, exc_info=True)
 
-            # Matches the real sandbox_db schema exactly: the redirects
-            # table has redirect_chain TEXT[] + redirect_url + http_status_code
-            # -- there is no hop_index column. Each row does duplicate the
-            # full chain (that's the schema as designed, not a leftover
-            # bug); position within `chain` is preserved by iteration
-            # order rather than an explicit index column.
-            redirects_rows = []
-            for hop_url in chain:
-                status = next((r["status"] for r in responses if r["url"] == hop_url), None)
-                redirects_rows.append({
-                    "redirect_id": str(uuid.uuid4()),
-                    "scan_id": scan_id,
-                    "redirect_chain": chain,
-                    "redirect_url": hop_url,
-                    "http_status_code": status,
-                })
+                if home_path or full_path:
+                    mark("screenshots captured" if main_response is not None
+                         else "screenshots captured from a PARTIAL/failed navigation")
 
-            evasion_rows = [
-                {
-                    "technique_id": str(uuid.uuid4()),
-                    "scan_id": scan_id,
-                    "technique_name": name,
-                    # BOOLEAN column in evasion_techniques -- True/False,
-                    # not 1/0 (an int into a BOOLEAN column is a type
-                    # mismatch for most DB drivers).
-                    "evasion_technique_flags": bool(re.search(pat, inline_script_text)),
-                }
-                for name, pat in EVASION_PATTERNS.items()
-            ]
+                # Opt-in active probe — runs AFTER passive metrics/screenshots are
+                # captured, so it can never contaminate them with post-submit
+                # state. Not gated on main_response: probe_credential_redirect
+                # already safely no-ops if it finds no password field, and a
+                # partial/timed-out page may still have rendered a real one.
+                if probe_credentials:
+                    credential_probe_result = await probe_credential_redirect(page)
+                    mark(f"credential-redirect probe: {credential_probe_result.get('attempted')}")
 
-            headers_rows = [
-                {
-                    "header_id": str(uuid.uuid4()),
-                    "scan_id": scan_id,
-                    "security_headers_present": h,
-                }
-                for h in SECURITY_HEADER_KEYS if h in main_headers
-            ]
+                b64_pattern = re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")
+                base64_encoded_script_count = len(b64_pattern.findall(inline_script_text))
 
-            cloaking_detected = None
-            if final_url:
-                try:
-                    cloaking_detected = await check_cloaking(browser, final_url, viewport, allow_private_targets,
-                                                              egress_proxy_port=egress_proxy_port)
-                    mark("cloaking check complete")
-                except Exception as e:
-                    mark(f"cloaking check failed: {e}")
-                    logger.warning("Cloaking check failed: %s", e, exc_info=True)
+                redirect_trigger_types = []
+                if has_meta_refresh:
+                    redirect_trigger_types.append("meta_refresh")
+                if JS_REDIRECT_PATTERN.search(inline_script_text):
+                    redirect_trigger_types.append("js_redirect")
+
+                js_obfuscation_score = compute_js_obfuscation_score(inline_script_text)
+
+                qr_code_detected = None
+                qr_linked_scan = None
+                if QR_AVAILABLE and full_path:
+                    qr_code_detected, qr_urls = detect_qr(full_path)
+                    if qr_urls and qr_recursion_depth < max_qr_recursion_depth:
+                        # Recurse on at most the first decoded URL — a page with
+                        # several QR codes shouldn't multiply detonation cost
+                        # linearly; one extra hop is enough to catch the common
+                        # "QR points at the real phishing page" pattern.
+                        qr_target = qr_urls[0]
+                        mark(f"QR code decoded to {qr_target}; recursing (depth {qr_recursion_depth + 1})")
+                        qr_linked_scan = await scan_url(
+                            qr_target,
+                            timeout_ms=timeout_ms,
+                            viewport=viewport,
+                            proxy=proxy,
+                            egress_proxy_port=egress_proxy_port,
+                            simulate_human=simulate_human,
+                            allow_private_targets=allow_private_targets,
+                            browser=browser,  # reuse the same (possibly pooled) browser
+                            qr_recursion_depth=qr_recursion_depth + 1,
+                            max_qr_recursion_depth=max_qr_recursion_depth,
+                        )
+                    elif qr_urls:
+                        mark(f"QR code decoded to a URL but max recursion depth "
+                             f"({max_qr_recursion_depth}) already reached; not following it")
+
+                brand_match = None
+                if _BRAND_MATCHER is not None and full_path and main_response is not None:
+                    try:
+                        brand_match = _BRAND_MATCHER.match(full_path)
+                        if brand_match:
+                            mark(f"brand-impersonation match: {brand_match['brand']} "
+                                 f"(similarity {brand_match['similarity']})")
+                    except Exception as e:
+                        logger.warning("Brand matching failed during scan of %s: %s", full_path, e)
+                        brand_match = None
+                elif _BRAND_MATCHER is not None and full_path and main_response is None:
+                    mark("brand-impersonation check skipped -- screenshot is from a "
+                         "partial/failed navigation (chrome-error page), not real content")
+
+                requests = [e for e in network_events if e["type"] == "request"]
+                responses = [e for e in network_events if e["type"] == "response"]
+                total_request_count = len(requests)
+
+                req_domains = {domain_of(e["url"]) for e in requests if domain_of(e["url"])}
+                unique_requested_domains = len(req_domains)
+                page_domain = domain_of(final_url or url)
+                third_party_domain_count = len([d for d in req_domains if d != page_domain])
+
+                xhr_request_count = len([e for e in requests if e["resource_type"] in ("xhr", "fetch")])
+                websocket_connection_count = ws_count["n"]
+
+                popup_count, new_tab_count = classify_window_opens(window_open_events)
+
+                downloads_rows = []
+                for d in downloads:
+                    size = None
+                    quarantined_path = None
+                    try:
+                        # Defensive: Path() wrap around d.path()'s result.
+                        # Playwright's async API is typed to return
+                        # Optional[pathlib.Path] here at the version pinned
+                        # in docker/requirements.txt, so this is a no-op
+                        # today (Path(existing_path_obj) is idempotent) --
+                        # it's just cheap insurance against a future
+                        # Playwright version changing that return type to a
+                        # plain str, which would otherwise make .stat() /
+                        # .unlink() below raise AttributeError.
+                        raw_path = await d.path()
+                        tmp_path = Path(raw_path) if raw_path else None
+                        if tmp_path:
+                            size = tmp_path.stat().st_size
+                            if size <= MAX_DOWNLOAD_BYTES:
+                                os.makedirs(DOWNLOAD_QUARANTINE_DIR, exist_ok=True)
+                                safe_name = os.path.basename(getattr(d, "suggested_filename", "") or "download")[:128]
+                                quarantined_path = os.path.join(
+                                    DOWNLOAD_QUARANTINE_DIR,
+                                    f"{scan_id}_{uuid.uuid4().hex[:8]}_{safe_name}",
+                                )
+                                shutil.move(str(tmp_path), quarantined_path)
+                            else:
+                                # Over the cap: keep the recorded size as a signal,
+                                # but don't let a malicious page fill the disk.
+                                tmp_path.unlink(missing_ok=True)
+                                mark(f"download over size cap discarded ({size} bytes)")
+                    except Exception as e:
+                        logger.warning("Download handling failed for %s: %s",
+                                        getattr(d, "suggested_filename", "?"), e, exc_info=True)
+                    safe_name = os.path.basename(getattr(d, "suggested_filename", "") or "download")[:128]
+                    downloads_rows.append({
+                        "downloaded_id": str(uuid.uuid4()),
+                        "scan_id": scan_id,
+                        "file_name": safe_name,
+                        "file_size": size,
+                        # Ops/debug field, not part of the DOWNLOADS table schema —
+                        # drop this key before inserting if your DB column set is strict.
+                        "quarantined_path": quarantined_path,
+                    })
+                if downloads_rows:
+                    mark(f"{len(downloads_rows)} download(s) captured")
+
+                # Matches the real sandbox_db schema exactly: the redirects
+                # table has redirect_chain TEXT[] + redirect_url + http_status_code
+                # -- there is no hop_index column. Each row does duplicate the
+                # full chain (that's the schema as designed, not a leftover
+                # bug); position within `chain` is preserved by iteration
+                # order rather than an explicit index column.
+                redirects_rows = []
+                for hop_url in chain:
+                    status = next((r["status"] for r in responses if r["url"] == hop_url), None)
+                    redirects_rows.append({
+                        "redirect_id": str(uuid.uuid4()),
+                        "scan_id": scan_id,
+                        "redirect_chain": chain,
+                        "redirect_url": hop_url,
+                        "http_status_code": status,
+                    })
+
+                evasion_rows = [
+                    {
+                        "technique_id": str(uuid.uuid4()),
+                        "scan_id": scan_id,
+                        "technique_name": name,
+                        # BOOLEAN column in evasion_techniques -- True/False,
+                        # not 1/0 (an int into a BOOLEAN column is a type
+                        # mismatch for most DB drivers).
+                        "evasion_technique_flags": bool(re.search(pat, inline_script_text)),
+                    }
+                    for name, pat in EVASION_PATTERNS.items()
+                ]
+
+                headers_rows = [
+                    {
+                        "header_id": str(uuid.uuid4()),
+                        "scan_id": scan_id,
+                        "security_headers_present": h,
+                    }
+                    for h in SECURITY_HEADER_KEYS if h in main_headers
+                ]
+
+                cloaking_detected = None
+                if final_url:
+                    try:
+                        cloaking_detected = await check_cloaking(browser, final_url, viewport, allow_private_targets,
+                                                                  egress_proxy_port=egress_proxy_port)
+                        mark("cloaking check complete")
+                    except Exception as e:
+                        mark(f"cloaking check failed: {e}")
+                        logger.warning("Cloaking check failed: %s", e, exc_info=True)
 
             finally:
                 if background_tasks:

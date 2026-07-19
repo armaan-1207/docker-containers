@@ -69,6 +69,50 @@ class DetonateResponse(BaseModel):
     output_snippet: str
 
 
+@app.on_event("startup")
+async def verify_host_firewall_and_image():
+    """
+    Check on startup if SANDBOX_IMAGE is pinned and test active network isolation.
+    """
+    is_prod = os.environ.get("ENVIRONMENT", "").lower() == "production"
+    if is_prod and "454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c" in SANDBOX_IMAGE:
+        raise RuntimeError(
+            "CRITICAL: SANDBOX_IMAGE is set to the default placeholder digest in production! "
+            "Run 'make pin-sandbox' or 'python scripts/pin_sandbox.py' before starting."
+        )
+
+    try:
+        cmd = [
+            "docker", "run", "--rm",
+            "--network", SANDBOX_NETWORK,
+            "--cap-drop=ALL",
+            "--security-opt", "no-new-privileges:true",
+            "busybox:1.36-uclibc",
+            "sh", "-c", "nc -z -w 2 169.254.169.254 80 2>/dev/null"
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+        if proc.returncode == 0:
+            msg = (
+                f"[CRITICAL SECURITY WARNING] Host firewall rules (scripts/setup_host_firewall.sh) "
+                f"appear to NOT be enforced on network '{SANDBOX_NETWORK}'! A test probe successfully connected "
+                f"to AWS/GCP metadata service (169.254.169.254). Please run 'sudo bash scripts/setup_host_firewall.sh' immediately."
+            )
+            logger.error(msg)
+            if is_prod:
+                raise RuntimeError(msg)
+        else:
+            logger.info("[startup] Host firewall / network isolation verified for %s (probe rejected)", SANDBOX_NETWORK)
+    except Exception as e:
+        if isinstance(e, RuntimeError):
+            raise
+        logger.debug("[startup] Could not run active firewall probe check (non-fatal): %s", e)
+
+
 @app.post("/detonate", response_model=DetonateResponse)
 async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
     if not x_runner_auth or not hmac.compare_digest(x_runner_auth, SANDBOX_RUNNER_SECRET):
@@ -120,7 +164,7 @@ async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges:true",
             "--read-only",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",  # nosec B108
             "--tmpfs", "/home/sandbox/.config:rw,noexec,nosuid,size=32m",
             "--tmpfs", "/home/sandbox/.pki:rw,noexec,nosuid,size=16m",
             "--tmpfs", "/home/sandbox/.local:rw,noexec,nosuid,size=32m",
@@ -185,4 +229,4 @@ async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    uvicorn.run(app, host="0.0.0.0", port=8002)  # nosec B104

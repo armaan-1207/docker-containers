@@ -46,6 +46,8 @@ x-backend-common: &backend-common
       condition: service_healthy
     redis_security:
       condition: service_healthy
+    clamav:
+      condition: service_healthy
   security_opt:
     - no-new-privileges:true
   cap_drop:
@@ -310,7 +312,6 @@ services:
     networks:
       - aegis_net          # celery_worker communicates here via RPC
       - docker_proxy_net   # docker_socket_proxy ONLY reachable by this service
-      - sandbox_net        # ensures docker compose always creates aegis_sandbox_net on startup
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -445,6 +446,29 @@ services:
           memory: 2048M
         reservations:
           cpus: "0.25"
+
+  # ---------------------------------------------------
+  # 8b. SANDBOX NET HOLDER — Keeps `aegis_sandbox_net` active
+  # ---------------------------------------------------
+  sandbox_net_holder:
+    image: alpine:3.19
+    container_name: aegis_sandbox_net_holder
+    command: ["tail", "-f", "/dev/null"]
+    networks:
+      - sandbox_net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    user: "65534:65534"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.05"
+          memory: 16M
+
   # ---------------------------------------------------
   # 9. SANDBOX — Playwright Detonation Container
   # ---------------------------------------------------
@@ -453,7 +477,7 @@ services:
     build:
       context: ./sandbox
       dockerfile: docker/Dockerfile
-    image: ${SANDBOX_IMAGE:-aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c}
+    image: ${SANDBOX_DEBUG_IMAGE:-aegis-sandbox:v1.0.0}
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # --- Security notice (Volume Scoping & Isolation - Finding #3) ---

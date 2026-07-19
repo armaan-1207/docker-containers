@@ -136,7 +136,7 @@ async def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Respons
     scan_dir = _scan_dir(scan_id)
     os.makedirs(scan_dir, exist_ok=True)
     try:
-        os.chmod(scan_dir, 0o777)
+        os.chmod(scan_dir, 0o770)  # nosec B103
     except OSError:
         pass
 
@@ -160,6 +160,12 @@ async def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Respons
                     os.remove(p)
                 except OSError:
                     pass
+        if "scanner unavailable" in png_details.lower() or "scanner unavailable" in html_details.lower() or "initializing" in png_details.lower() or "initializing" in html_details.lower():
+            from fastapi import HTTPException, status
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Anti-malware scanner (ClamAV) is currently initializing or unavailable. Please retry shortly.",
+            )
         raise ValueError(
             f"Malware check rejected Stage 2 upload: {png_details} | {html_details}"
         )

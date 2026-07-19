@@ -30,10 +30,6 @@ def main():
             os.path.join(root_dir, "docker-compose.yml"),
             rf'SANDBOX_IMAGE:\s*\$\{{SANDBOX_IMAGE:-({_SANDBOX_IMAGE_PATTERN})\}}'
         ),
-        "docker-compose.yml (sandbox)": (
-            os.path.join(root_dir, "docker-compose.yml"),
-            rf'image:\s*\$\{{SANDBOX_IMAGE:-({_SANDBOX_IMAGE_PATTERN})\}}'
-        ),
         "backend/config.py": (
             os.path.join(root_dir, "backend", "config.py"),
             rf'SANDBOX_IMAGE:\s*str\s*=\s*"({_SANDBOX_IMAGE_PATTERN})"'

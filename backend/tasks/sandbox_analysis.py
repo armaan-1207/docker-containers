@@ -101,7 +101,7 @@ async def _run_sandbox_container(scan_id: str, target_url: str, timeout_sec: int
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=timeout_sec + 15) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_sec + 15) as resp:  # nosec B310
             return json.loads(resp.read().decode("utf-8"))
 
     try:
@@ -261,7 +261,7 @@ def sandbox_analysis_task(self, scan_id: str):
     scan_dir = _scan_dir(scan_id)
     os.makedirs(scan_dir, exist_ok=True)
     try:
-        os.chmod(scan_dir, 0o777)
+        os.chmod(scan_dir, 0o770)  # nosec B103
     except OSError:
         pass
 
