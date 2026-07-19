@@ -115,8 +115,11 @@ for _ in range(18):
     elapsed = int(time.time() - start_time)
     print(f"    [{elapsed:02d}s] Status: {current_status:<25} | score: {score:<6} | severity: {sev}")
     
-    if current_status in ["risk_fusion_done", "risk_fusion_failed", "sandbox_analysis_failed", "error"]:
-        print(f"\n[+] Pipeline completed with final status: {current_status}")
+    if current_status == "risk_fusion_done":
+        print(f"\n[+] Pipeline completed successfully with final status: {current_status}")
+        break
+    elif current_status.endswith("_failed") or current_status.startswith("failed") or current_status in ["error", "risk_fusion_failed", "sandbox_analysis_failed"]:
+        print(f"\n[-] Pipeline aborted with terminal failure status: {current_status}")
         break
     time.sleep(2)
 

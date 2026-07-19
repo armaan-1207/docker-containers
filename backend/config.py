@@ -36,7 +36,7 @@ Key security notes:
 
 import logging
 from typing import Optional, Literal
-from urllib.parse import urlparse, urlunparse, quote_plus
+from urllib.parse import urlparse, urlunparse, quote_plus, unquote
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -142,7 +142,7 @@ class Settings(BaseSettings):
             return v
 
         parsed = urlparse(v)
-        if parsed.password and parsed.password != password:
+        if parsed.password and unquote(parsed.password) != password:
             logger.warning(
                 "DATABASE_URL's embedded password does not match "
                 "AEGIS_DB_PASSWORD -- using AEGIS_DB_PASSWORD (the value "
@@ -270,8 +270,8 @@ class Settings(BaseSettings):
     # -------------------------
     SAFE_THRESHOLD: int = 20
     LOW_THRESHOLD: int = 40
-    MEDIUM_THRESHOLD: int = 60
-    HIGH_THRESHOLD: int = 80
+    MEDIUM_THRESHOLD: int = 70
+    HIGH_THRESHOLD: int = 85
     LOG_LEVEL: str = "INFO"
 
     # Trusted Domain Allowlist (`quickscan.py` finding #11)
@@ -282,6 +282,26 @@ class Settings(BaseSettings):
         "apple.com",
         "amazon.com",
     ]
+
+    @field_validator("SUPERUSER_EMAILS", "TRUSTED_ALLOWLIST_DOMAINS", mode="before")
+    @classmethod
+    def _parse_list_str(cls, v: any) -> list[str]:
+        """
+        Accepts either JSON array format '["a@b.com"]' or comma-separated strings 'a@b.com,c@d.com'
+        when loading from environment or .env files.
+        """
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return []
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    return json.loads(v)
+                except Exception:
+                    pass
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -326,9 +346,9 @@ if not origins:
             "Explicitly configure CORS_ALLOWED_ORIGINS with allowed origins before running."
         )
 
-if ":latest" in settings.SANDBOX_IMAGE or "@sha256:" not in settings.SANDBOX_IMAGE:
+if ":latest" in settings.SANDBOX_IMAGE or ("@sha256:" not in settings.SANDBOX_IMAGE and not settings.SANDBOX_IMAGE.startswith("sha256:")):
     raise RuntimeError(
-        f"Secure-by-default check: SANDBOX_IMAGE ('{settings.SANDBOX_IMAGE}') uses mutable tag or lacks @sha256 digest. "
+        f"Secure-by-default check: SANDBOX_IMAGE ('{settings.SANDBOX_IMAGE}') uses mutable tag or lacks sha256 digest. "
         "Pin SANDBOX_IMAGE by immutable digest before running."
     )
 

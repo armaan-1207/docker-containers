@@ -172,10 +172,18 @@ def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Response:
 
     # ── Queue Celery pipeline ─────────────────────────────────────────────
     from tasks.browser_features import browser_features_task
-    async_result = browser_features_task.delay(scan_id)
-
-    scan.status = "browser_features_running"
-    db.commit()
+    try:
+        async_result = browser_features_task.delay(scan_id)
+        scan.status = "browser_features_running"
+        db.commit()
+    except Exception as exc:
+        scan.status = "stage2_dispatch_failed"
+        db.commit()
+        logger.exception("Failed to dispatch browser_features_task for scan %s", scan_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Task dispatch queue is currently unavailable. Please retry shortly.",
+        ) from exc
 
     return Stage2Response(
         scan_id=scan_id,

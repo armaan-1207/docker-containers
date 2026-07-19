@@ -38,10 +38,13 @@ def main():
         digest = None
 
     if not digest or "sha256:" not in digest:
-        # If not pushed to repo, get image ID sha256
+        # If not pushed to repo, get image ID sha256.
+        # DevSecOps Hardening (Finding #2): For local-only images without a RepoDigest,
+        # constructing 'aegis-sandbox@sha256:<sha>' creates an un-runnable reference in Docker.
+        # Using 'sha256:<sha>' directly resolves cleanly for both 'docker inspect' and 'docker run'.
         inspect_id = run(["docker", "inspect", "--format={{.Id}}", IMAGE_NAME])
         sha = inspect_id.split(":")[-1]
-        digest = f"{IMAGE_NAME.split(':')[0]}@sha256:{sha}"
+        digest = f"sha256:{sha}"
 
     print(f"[pin-sandbox] Resolved digest: {digest}")
 
@@ -76,7 +79,7 @@ def main():
         print(f"[pin-sandbox] Successfully updated SANDBOX_IMAGE in {target_path} to {digest}")
 
     # Also update code fallback defaults in docker-compose.yml, config.py, and sandbox_runner_svc.py
-    _digest_pattern = r'aegis-sandbox(?::[^\s@]+)?@sha256:[a-f0-9]{64}'
+    _digest_pattern = r'(?:aegis-sandbox(?::[^\s@]+)?@sha256:[a-f0-9]{64}|sha256:[a-f0-9]{64})'
     code_targets = [
         (os.path.join(root_dir, "docker-compose.yml"), rf'(SANDBOX_IMAGE:\s*\$\{{SANDBOX_IMAGE:-){_digest_pattern}(\}})', rf'\g<1>{digest}\g<2>'),
         (os.path.join(root_dir, "docker-compose.yml"), rf'(image:\s*\$\{{SANDBOX_IMAGE:-){_digest_pattern}(\}})', rf'\g<1>{digest}\g<2>'),

@@ -25,6 +25,12 @@ RUNNING_STATUSES = {
     "risk_fusion_running",
     "alert_pipeline_running",
     "alert_pipeline_retrying",
+    "stage2_dispatch_failed",
+    "quickscan_dispatch_failed",
+    "sandbox_analysis_dispatch_failed",
+    "consistency_dispatch_failed",
+    "risk_fusion_dispatch_failed",
+    "alert_pipeline_dispatch_failed",
 }
 
 

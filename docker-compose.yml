@@ -437,6 +437,13 @@ services:
       context: ./backend
       dockerfile: Dockerfile.worker
     container_name: aegis_celery_beat
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis_security:
+        condition: service_healthy
     entrypoint: ["/app/celery_entrypoint.sh"]
     command: >
       celery -A celery_beat beat

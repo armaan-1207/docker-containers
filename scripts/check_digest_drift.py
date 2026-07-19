@@ -15,7 +15,7 @@ def get_digest(content, pattern):
         return None
     return match.group(1)
 
-_SANDBOX_IMAGE_PATTERN = r'aegis-sandbox(?::[^\s@]+)?@sha256:[a-f0-9]{64}'
+_SANDBOX_IMAGE_PATTERN = r'(?:aegis-sandbox(?::[^\s@]+)?@sha256:[a-f0-9]{64}|sha256:[a-f0-9]{64})'
 
 
 def main():
