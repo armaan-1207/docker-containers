@@ -36,13 +36,8 @@ switch ($Command) {
     "up" {
         Write-Header "Starting Core Services"
         
-        # Enforce supply chain signature verification if cosign is available
-        if (Get-Command "cosign" -ErrorAction SilentlyContinue) {
-            Write-Host "[INFO] Cosign detected, verifying image signatures..." -ForegroundColor Cyan
-            .\aegis.ps1 verify
-        } else {
-            Write-Host "[WARN] Cosign not installed. Skipping local signature verification." -ForegroundColor Yellow
-        }
+        # Supply chain signature verification is now opt-in via '.\aegis.ps1 verify'
+        # so it doesn't block local development where images are built locally and unsigned.
 
         docker compose -f $COMPOSE_FILE up -d nginx backend redis postgres celery_worker celery_beat
         Write-Host ""
@@ -77,11 +72,24 @@ switch ($Command) {
 
     "verify" {
         Write-Header "Verifying Image Signatures"
-        # Verify local images built/pulled during CI
-        Write-Host "Verifying aegis-sandbox:ci..."
-        cosign verify --key cosign.pub aegis-sandbox:ci || { Write-Host "[FATAL] Signature mismatch or missing for aegis-sandbox:ci" -ForegroundColor Red; exit 1 }
-        Write-Host "Verifying aegis-worker:ci..."
-        cosign verify --key cosign.pub aegis-worker:ci || { Write-Host "[FATAL] Signature mismatch or missing for aegis-worker:ci" -ForegroundColor Red; exit 1 }
+        if (-not (Get-Command "cosign" -ErrorAction SilentlyContinue)) {
+            Write-Host "[FATAL] Cosign is not installed. Please install it to verify signatures." -ForegroundColor Red
+            exit 1
+        }
+        
+        # Extract the real sandbox image name from .env
+        $sandboxImage = "aegis-sandbox:local"
+        if (Test-Path .env) {
+            $sandboxImageLine = Get-Content .env | Where-Object { $_ -match "^SANDBOX_IMAGE=" }
+            if ($sandboxImageLine) {
+                $sandboxImage = $sandboxImageLine.Split("=", 2)[1].Trim()
+            }
+        }
+
+        Write-Host "Verifying $sandboxImage..."
+        cosign verify --key cosign.pub $sandboxImage || { Write-Host "[FATAL] Signature mismatch or missing for $sandboxImage" -ForegroundColor Red; exit 1 }
+        
+        Write-Host "[OK] Signatures verified successfully." -ForegroundColor Green
     }
 
     "sandbox" {

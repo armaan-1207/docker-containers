@@ -340,6 +340,7 @@ services:
       dockerfile: Dockerfile.runner
     container_name: aegis_sandbox_runner
     environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       DOCKER_HOST: tcp://docker_socket_proxy:2375
       SANDBOX_NETWORK: aegis_sandbox_net
       SHARED_SCANS_VOLUME: aegis_shared_scans
