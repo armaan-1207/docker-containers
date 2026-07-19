@@ -6,7 +6,7 @@
 [![CI/CD DevSecOps Pipeline](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](#-devsecops--ci-cd-pipeline)
 [![Docker Security Hardened](https://img.shields.io/badge/Docker-Security_Hardened-2496ED?style=for-the-badge&logo=docker&logoColor=white)](#-7-layer-defense-in-depth-architecture)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white)](#)
-[![Playwright Detonation](https://img.shields.io/badge/Detonation-Playwright_Stage_5-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](#-pipeline-scan-duration--timing-breakdown)
+[![Playwright Detonation](https://img.shields.io/badge/Detonation-Playwright_Stage_2-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](#-pipeline-scan-duration--timing-breakdown)
 [![ClamAV Malware Engine](https://img.shields.io/badge/Malware_Engine-ClamAV_Sidecar-FF6600?style=for-the-badge&logo=clamav&logoColor=white)](#-shared-data-bus--shared_scans-volume)
 [![Supply Chain CycloneDX & Cosign](https://img.shields.io/badge/Supply_Chain-CycloneDX_%7C_Cosign-8A2BE2?style=for-the-badge&logo=sigstore&logoColor=white)](#-devsecops--ci-cd-pipeline)
 
@@ -18,9 +18,9 @@
 
 ## 🌟 Executive Summary & Overview
 
-The **AEGIS Phishing Intelligence Platform** is an advanced orchestration suite and security pipeline designed to ingest, detonate, and classify suspicious web URLs, credential harvesting pages, and drive-by downloads in real time. 
+The **AEGIS Phishing Intelligence Platform** is a secure orchestration suite and analysis pipeline designed to ingest, detonate, and classify suspicious URLs, credential harvesting pages, and drive-by downloads in real time. 
 
-Traditional sandbox architectures suffer from structural vulnerabilities: workers processing untrusted web content frequently have direct access to the `docker.sock` (allowing trivial container escape to host root), or headless browsers leak internal infrastructure addresses via WebRTC, mDNS, and DNS rebinding (`TOCTOU` attacks). 
+Traditional sandbox architectures suffer from structural vulnerabilities: workers processing untrusted web content frequently have direct access to the host's `docker.sock` (allowing trivial container escape to host root), or headless browsers leak internal infrastructure addresses via WebRTC, mDNS, and DNS rebinding (`TOCTOU` attacks). 
 
 AEGIS eliminates these attack vectors by enforcing a **7-Layer Defense-in-Depth Architecture**. Every component operates within strict least-privilege boundaries across three physically isolated Docker bridge networks (`aegis_net`, `docker_proxy_net`, and `aegis_sandbox_net`), backed by kernel-level host firewall rules, local proxy inspection, and strict secret segregation.
 
@@ -34,9 +34,9 @@ AEGIS eliminates these attack vectors by enforcing a **7-Layer Defense-in-Depth 
 | **API & Auth** | `aegis_backend` | `desktop-backend` | FastAPI / Uvicorn API server. JWT auth with SHA-256 pre-hashing & bcrypt (`UID 1001`). Enforces strict CORS and payload limits. | Internal (`8000`) |
 | **Database** | `aegis_postgres` | `postgres:16-alpine` | Primary relational datastore for Users, Scans, IOCs, and Incidents (`UID 999`). Isolated on `aegis_net`. | Internal (`5432`) |
 | **Broker & Cache** | `aegis_redis` | `redis:7.2-alpine` | Celery message broker & URL scan cache with AOF persistence (`--appendonly yes`). Protected by `REDIS_PASSWORD`. | Internal (`6379`) |
-| **Worker Engine** | `aegis_celery_worker`| `desktop-celery_worker`| Executes Stages 1–4 of the scan pipeline (`pytesseract`, OpenCV, ML Risk Ensemble). **Zero Docker CLI/socket access.** | Internal |
-| **Scheduler** | `aegis_celery_beat` | `desktop-celery_beat` | Periodic task scheduler (hourly retention cleanup, 10-minute job reconciliation). | Internal |
-| **Admission Control**| `aegis_sandbox_runner`| `desktop-aegis_sandbox_runner`| **RPC Gateway to Docker Socket.** Enforces `X-Runner-Auth` bearer token, UUIDv4 validation, & concurrency limits (`8002`). | Internal (`8002`) |
+| **Worker Engine** | `aegis_celery_worker`| `desktop-celery_worker`| Executes Stages 1–4 of the scan pipeline (`pytesseract` OCR, OpenCV, ML Risk Ensemble). **Zero Docker CLI/socket access.** | Internal |
+| **Scheduler** | `aegis_celery_beat` | `desktop-celery_beat` | Periodic task scheduler (hourly retention cleanup, 10-minute job reconciliation, daily PostgreSQL backups). | Internal |
+| **Admission Control**| `aegis_sandbox_runner`| `desktop-aegis_sandbox_runner`| **RPC Gateway to Docker Socket.** Enforces `X-Runner-Auth` bearer token, UUID validation, & concurrency limits (`8002`). | Internal (`8002`) |
 | **Malware Engine** | `aegis_clamav` | `clamav/clamav:stable` | Isolated `INSTREAM` virus scanning sidecar for quarantined browser artifacts & downloads. | Internal (`3310`) |
 | **Detonation Node** | `aegis_sandbox` | `desktop-sandbox` | Ephemeral, read-only Playwright/Chromium container spawned per scan job over isolated network. | Ephemeral |
 
@@ -68,7 +68,7 @@ AEGIS eliminates these attack vectors by enforcing a **7-Layer Defense-in-Depth 
 │  └──────────────────────┘                      └─────────────────┬────────────────┘  │
 └──────────────────────────────────────────────────────────────────┼───────────────────┘
                                                                    │ Authenticated RPC
-                                                                   │ (X-Runner-Auth + UUIDv4)
+                                                                   │ (X-Runner-Auth + UUID)
                                                                    ▼
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
 │  ADMISSION CONTROL LAYER: aegis_sandbox_runner (FastAPI on docker_proxy_net)         │
@@ -109,47 +109,54 @@ AEGIS eliminates these attack vectors by enforcing a **7-Layer Defense-in-Depth 
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 🔑 Security Highlights & Deep architectural controls
+### 🔑 Security Highlights & Deep Architectural Controls
 
 1. **Strict Secret Segregation Across Trust Boundaries**
-   * **No Shared Tokens (`SANDBOX_RUNNER_SECRET` vs `AEGIS_DB_PASSWORD`)**: Each trust boundary within AEGIS maintains its own independent cryptographic credential. The PostgreSQL database credentials (`AEGIS_DB_PASSWORD`) are completely separated from the RPC bearer token (`SANDBOX_RUNNER_SECRET`) required to communicate with `aegis_sandbox_runner`. This ensures that even if a database connection string were compromised, the attacker cannot invoke the Docker socket proxy to run containers.
+   * **No Shared Secrets**: Each trust boundary within AEGIS maintains its own independent cryptographic credential. The PostgreSQL database credentials (`AEGIS_DB_PASSWORD`) are completely separated from the RPC bearer token (`SANDBOX_RUNNER_SECRET`) required to communicate with `aegis_sandbox_runner`.
    * **Production Environment Enforcement**: When `ENVIRONMENT="production"`, `config.py` enforces strict startup validation: all secrets must be at least 32 characters (`len >= 32`), not equal to default development strings, and all CORS/Host settings (`ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`) must be explicitly defined without wildcards (`*`).
 
 2. **Complete Socket Severance & Admission Control (`aegis_sandbox_runner`)**
    * **Zero Docker API Exposure for Workers**: Celery workers processing untrusted web content via OCR (`pytesseract`) and computer vision (`OpenCV`) run inside `aegis_net` with **zero Docker CLI binaries and zero access to the Docker socket**.
-   * **Authenticated RPC Gateway**: When a worker needs to detonate a URL, it sends an HTTP POST request to `aegis_sandbox_runner:8002/detonate` over `aegis_sandbox_net`. The runner validates the `X-Runner-Auth` bearer token (`SANDBOX_RUNNER_SECRET`) and ensures the requested `scan_id` matches a strict UUIDv4 regex (`_UUID_RE`).
-   * **Immutable Container Command & Concurrency Limits**: The runner constructs a hardcoded, immutable Docker run invocation (`--cap-drop ALL`, `--read-only`, `--tmpfs`, `--security-opt no-new-privileges:true`). It enforces a strict concurrency ceiling (`MAX_CONCURRENT_DETONATIONS = 10`) via an `asyncio.Semaphore`, returning `HTTP 429 Too Many Requests` when saturated instead of overloading the Docker daemon.
+   * **Authenticated RPC Gateway**: When a worker needs to detonate a URL, it sends an HTTP POST request to `aegis_sandbox_runner:8002/detonate` over `aegis_sandbox_net`. The runner validates the `X-Runner-Auth` bearer token (`SANDBOX_RUNNER_SECRET`) and ensures the requested `scan_id` matches a strict UUID pattern (`_UUID_RE`).
+   * **Immutable Container Command & Concurrency Limits**: The runner constructs a hardcoded, immutable Docker run invocation (`--cap-drop ALL`, `--read-only`, `--tmpfs`, `--security-opt no-new-privileges:true`). It enforces a strict concurrency ceiling (`MAX_CONCURRENT_DETONATIONS = 10`) via an `asyncio.Semaphore`, returning `HTTP 429 Too Many Requests` when saturated.
 
 3. **Kernel-Level & Application-Layer SSRF Protection**
-   * **Host Kernel `DOCKER-USER` Firewall**: `scripts/setup_host_firewall.sh` inserts rules directly into the Linux host `DOCKER-USER` chain. Even if an attacker achieves Remote Code Execution inside the Chromium container and crafts raw packets bypassing the local proxy, the host kernel drops any traffic originating from `aegis_sandbox_net` destined for **Cloud Metadata (`169.254.169.254`)**, loopback (`127.0.0.0/8`), or private IP ranges (`RFC 1918` / `RFC 6598 CGNAT`).
-   * **`egress_proxy.py` & `ssrf_guard.py`**: Inside the detonation container, Chromium routes all traffic through a local `asyncio` egress proxy (`127.0.0.1:8888`). The proxy resolves destination hostnames using `ssrf_guard.is_safe_url()`, checking resolved IP addresses against an extensive table of blocked networks (`0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`). It prevents `TOCTOU` DNS rebinding by connecting directly to the verified `(safe_ip, port)` tuple and limits open tunnels with `asyncio.Semaphore(50)`.
+   * **Host Kernel `DOCKER-USER` Firewall**: `scripts/setup_host_firewall.sh` inserts rules directly into the Linux host `DOCKER-USER` chain. Even if an attacker achieves Remote Code Execution inside the Chromium container, the host kernel drops any traffic originating from `aegis_sandbox_net` destined for **Cloud Metadata (`169.254.169.254`)**, loopback (`127.0.0.0/8`), or private IP ranges (`RFC 1918` / `RFC 6598 CGNAT`).
+   * **`egress_proxy.py` & `ssrf_guard.py`**: Inside the detonation container, Chromium routes all traffic through a local `asyncio` egress proxy (`127.0.0.1:8888`). The proxy resolves destination hostnames using `ssrf_guard.is_safe_url()`, checking resolved IP addresses against an extensive table of blocked networks (`0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`). It prevents `TOCTOU` DNS rebinding by connecting directly to the verified `(safe_ip, port)` tuple.
 
 4. **ClamAV Anti-Malware Sidecar (`INSTREAM` Socket)**
-   * Every file downloaded by the browser during detonation (`suggested_filename` sanitized against path traversal) or raw DOM structure captured is written to `shared_scans/quarantine/`.
+   * Every file downloaded by the browser during detonation or raw DOM structure captured is written to `shared_scans/quarantine/`.
    * The `aegis_clamav` container (`TCP 3310`) inspects artifacts using ClamAV's streaming `INSTREAM` protocol. If `CLAMAV_FAIL_CLOSED=True` is set in production and the scanner daemon is unreachable, the platform fails closed to ensure no unverified artifact is marked clean.
 
 5. **Authentication Hardening, Account Lockout & HIBP Breached Password Check**
    * **SHA-256 Pre-hashing & Timing-Attack Protection**: To safely handle long passwords and prevent `bcrypt` truncation vulnerabilities (`>72 bytes`), all user passwords are pre-hashed with SHA-256 before `bcrypt` rounds. Login flows use constant-time dummy comparisons (`_DUMMY_HASH`) on unknown users to prevent account enumeration.
-   * **k-Anonymity Breached Password Validation**: During user registration (`POST /api/auth/register`), the backend queries Have I Been Pwned (`api.pwnedpasswords.com/range/{prefix}`) using only the first 5 hex characters of the SHA-1 hash. Known breached passwords (`score >= 100`) are rejected immediately without leaking user credentials or exposing API connectivity errors (`record_hibp_failure_metric` alerting).
+   * **k-Anonymity Breached Password Validation**: During user registration, the backend queries Have I Been Pwned using only the first 5 hex characters of the SHA-1 hash. Known breached passwords are rejected immediately.
    * **Redis-Backed Account Lockout & JWT Revocation**: Repeated failed logins trigger an automatic temporary lockout per IP and email. On explicit logout or password reset, the JWT `jti` is added to a Redis blacklist with a TTL matching exactly the token's remaining validity window.
 
-6. **Automated File & Job Cleanup (`file_cleanup.py` & `job_reconciliation.py`)**
-   * **Disk Exhaustion Prevention**: Celery beat triggers `file_cleanup_task` every hour, scanning `shared_scans/` and removing per-scan `UUID` directories and quarantined samples older than `ARTIFACT_RETENTION_DAYS` (default 14 days), as well as any orphan files left behind by crashed runs.
-   * **Job Reconciliation**: Every 10 minutes, `reconcile_stale_jobs_task` inspects PostgreSQL for any scan tasks stuck in `pending` or `running` states longer than their timeout thresholds, cleanly transitioning orphaned jobs to `failed_timeout`.
+6. **Automated File, Job, & Database Backup Management**
+   * **Disk Exhaustion Prevention**: Celery beat triggers `file_cleanup_task` every hour, removing per-scan `UUID` directories and quarantined samples older than `ARTIFACT_RETENTION_DAYS` (default 14 days).
+   * **Job Reconciliation**: Every 10 minutes, `reconcile_stale_jobs_task` inspects PostgreSQL for any scan tasks stuck in pending or running states longer than 30 minutes, cleanly transitioning orphaned jobs to `failed_timeout`.
+   * **Automated Daily Backups**: Celery beat schedules daily logical PostgreSQL backups (`pg_dump`) at **03:00 UTC**. Backups are written to the `aegis_db_backups` Docker volume (mounted at `/backups` in the Celery worker) and automatically pruned after **7 days**.
+
+7. **Robust Browser Lifecycle, pHash Mismatch & Atomicity Safeguards**
+   * **Leak-Proof Browser Cleanup**: Playwright detonation in `phishing_sandbox_scan.py` is wrapped in structured outer `try/finally` blocks, ensuring the browser daemon process (`browser.close()`) is always terminated and cleaned up regardless of navigation or page initialization failures.
+   * **Background Task Tracking**: Tracks and cleanly cancels any background response/page tasks created via `asyncio.create_task` during the scan session, preventing task leakage or unawaited task exception warnings.
+   * **pHash Shape & Bounds Hardening**: The perceptual-hash comparison loop in `BrandMatcher` guards against shape mismatches (e.g. 16x16 vs 8x8 hashes) and value overflows, skipping incompatible comparison targets dynamically via granular `try/except` handlers and clamping output similarity strictly to the `[0.0, 1.0]` boundary.
+   * **Cross-Platform Atomicity**: Replaced `os.rename` with `os.replace` in `_atomic_write_json` to support atomic JSON results replacement seamlessly on both Windows and POSIX-compliant deployment environments.
 
 ---
 
 ## ⚡ Pipeline Scan Duration & Timing Breakdown
 
-An end-to-end URL detonation through the 5-stage Celery pipeline completes in **10 to 20 seconds** on standard web targets. Below is the exact execution flow across each stage:
+An end-to-end URL detonation through the Celery pipeline completes in **10 to 20 seconds** on standard web targets. Below is the exact execution flow across each stage:
 
 | Pipeline Stage | Module & Tasks Performed | Typical Duration | Timeout / Safety Ceiling |
 | :--- | :--- | :--- | :--- |
-| **Stage 1: Feature Extraction** | `browser_features.py`<br>Fetches initial page HTML, extracts DOM feature metrics (`dom_extractor.py`), runs `pytesseract` OCR recognition on initial visual captures, and computes perceptual image hashes. | **2 – 5 sec** | ~10 sec |
+| **Stage 1: Feature Extraction** | `browser_features.py`<br>Fetches initial page HTML, extracts DOM feature metrics, runs `pytesseract` OCR recognition on initial visual captures, and computes perceptual image hashes. | **2 – 5 sec** | ~10 sec |
 | **Stage 2: Sandbox & Malware** | `sandbox_analysis.py`<br>**Container Detonation:** Issues RPC `POST /detonate` to `aegis_sandbox_runner:8002`, spawning an ephemeral read-only `aegis-sandbox` container over `aegis_sandbox_net` to navigate the target URL, wait for DOM stability, capture network HAR files, and collect screenshots.<br>**Malware Inspection:** Streams downloaded binaries and DOM dumps to `aegis_clamav:3310` via `INSTREAM`. | **6 – 15 sec** | **45 sec** (Chromium navigation timeout)<br>or **120 sec** (`SANDBOX_TIMEOUT_SEC` hard ceiling) |
 | **Stage 3: Cloaking Detection** | `consistency.py`<br>Runs `ConsistencyEngine` (`consistency_engine.py`) to perform structural and visual diffing (`phash` / pixel difference) between Stage 1 initial browser features and Stage 2 deep sandbox telemetry, identifying **cloaking** (sites serving benign pages to bots but phishing kits to real users). | **0.2 – 0.8 sec** | ~2 sec |
 | **Stage 4: ML Risk Ensemble** | `risk_fusion.py`<br>Aggregates multi-modal signals across OCR, DOM structure, URL heuristics, and cloaking similarity into a unified risk verdict (`0–100`). Updates PostgreSQL, caches real verdicts in Redis (`300s` Stage 1 -> `3600s` authoritative), and emits real-time `"Done"` event via WebSocket.<br>*(Note: Model weights are currently placeholder (`is_placeholder=True`) while the ML ensemble is trained externally).* | **0.3 – 0.7 sec** | ~2 sec |
-| **Stage 5: Incident Alerting** | `alert_pipeline.py`<br>*(Triggered asynchronously when risk level is `HIGH` or `CRITICAL`)*. Generates formal `Incident` and `IOC` records in PostgreSQL and dispatches SIEM/Slack notifications without delaying user UI responses. | **Async (~1 sec)** | Non-blocking |
+| **Stage 5: Incident Alerting** | `alert_pipeline.py`<br>*(Triggered asynchronously when risk level is `HIGH` or `CRITICAL`)*. Generates formal `Incident` and `IOC` records in PostgreSQL and dispatches SIEM/Slack notifications without delaying user UI responses. Marks status as `alert_pipeline_running` on execution start. | **Async (~1 sec)** | Non-blocking |
 
 ### 🕒 Execution Scenarios
 * **Fast Path (~10 to 18 seconds):** Standard responsive landing pages load and settle quickly; the final classification is emitted over WebSocket almost immediately.
@@ -160,12 +167,24 @@ An end-to-end URL detonation through the 5-stage Celery pipeline completes in **
 
 ## 💾 Shared Data Bus — `shared_scans` Volume
 
-All stages communicate cleanly without passing multi-megabyte image payloads through Redis memory by mounting the `aegis_shared_scans` Docker volume across `aegis_backend`, `celery_worker`, `aegis_sandbox_runner`, and the ephemeral `aegis_sandbox` containers:
+All stages communicate cleanly without passing multi-megabyte image payloads through Redis memory by mounting the `aegis_shared_scans` Docker volume across `aegis_backend`, `celery_worker`, `aegis_sandbox_runner`, and the ephemeral `aegis_sandbox` containers.
 
+### Schema Ingestion & Telemetry Mapping
+
+During **Stage 2 (Sandbox & Malware)**, detailed execution logs captured by the Playwright engine (`sandbox_metadata.json`) are structured and automatically ingested into PostgreSQL relational tables. This supports high-performance querying and analytics across six database entities:
+
+* **`NetworkActivity`**: Raw logs of all HTTP/HTTPS requests triggered during detonation, capturing URLs, resource types, methods, and status codes.
+* **`TLSConnection`**: Full cryptographic profiles of connections established, tracking TLS versions, cipher suites, certificate details, and key exchange algorithms.
+* **`FormMetrics`**: Extraction of form tags, field types (e.g. password, email, text), target action URLs, and submission hooks to detect credential harvesting traps.
+* **`Download`**: Quarantined files, file names, SHA-256 hashes, MIME types, and destination paths processed by `aegis_clamav`.
+* **`Redirect`**: Full browser navigation timeline logs capturing HTTP redirects, JavaScript routing, and window-open hooks.
+* **`EvasionTechnique`**: Flagged anomalies indicating anti-sandbox evasion (e.g., debugger statements, viewport inspection, browser fingerprinting, and virtualization checks).
+
+### Local Storage Layout
 ```
 shared_scans/
 ├── quarantine/                  ← ClamAV quarantined downloads and dropped binary artifacts
-└── <scan_id>/                   ← Canonical UUIDv4 directory per detonation job
+└── <scan_id>/                   ← Canonical UUID directory per detonation job
     ├── browser.png              ← Stage 1: Initial browser viewport screenshot
     ├── browser.html             ← Stage 1: Initial raw page HTML
     ├── browser_features.json    ← Stage 1: OCR text, vision hashes, and DOM feature metrics
@@ -262,7 +281,7 @@ docker containers/
 │   ├── tests/               ← Complete backend pytest regression suite across services and tasks
 │   └── websocket/           ← Real-time WebSocket connection manager
 │
-├── sandbox/                 ← Stage 5 Playwright Detonation Engine
+├── sandbox/                 ← Stage 2 Playwright Detonation Engine
 │   ├── docker/              ← Chromium Dockerfile & browser dependencies
 │   ├── backend/             
 │   │   ├── egress_proxy.py  ← Hardened local proxy with asyncio.Semaphore(50) tunnel limits
@@ -278,7 +297,7 @@ docker containers/
 │   └── check_model_ready.py ← ML ensemble model verification utility
 │
 ├── nginx/                   ← Receptionist reverse proxy & dynamic/real TLS termination
-└── postgres/                ← Database init scripts & schema creation
+└── postgres/                ← Database init scripts, schema creation, & README
 ```
 
 ---

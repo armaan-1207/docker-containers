@@ -6,7 +6,9 @@ websocket/websocket_manager.py
 import asyncio
 import json
 import logging
+import os
 from typing import Dict, Optional, Set
+import uuid
 
 from fastapi import WebSocket, status
 from redis import asyncio as aioredis
@@ -26,6 +28,7 @@ def _user_channel(user_id: str) -> str:
 
 class WebSocketManager:
     def __init__(self):
+        self.worker_id = f"worker:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self.browser_connections: Dict[str, WebSocket] = {}
         self.user_connections: Dict[str, Set[WebSocket]] = {}
 
@@ -90,6 +93,7 @@ class WebSocketManager:
                 return False
 
         user_socks.add(websocket)
+        await self._update_worker_count(user_id, len(user_socks))
         logger.info("[%s] dashboard user connected", user_id)
         key = f"user:{user_id}:{id(websocket)}"
         self._listen_tasks[key] = asyncio.create_task(
@@ -103,6 +107,9 @@ class WebSocketManager:
             connections.discard(websocket)
             if not connections:
                 self.user_connections.pop(user_id, None)
+            await self._update_worker_count(user_id, len(connections) if connections else 0)
+        else:
+            await self._update_worker_count(user_id, 0)
         key = f"user:{user_id}:{id(websocket)}"
         task = self._listen_tasks.pop(key, None)
         if task:
@@ -169,29 +176,54 @@ class WebSocketManager:
 
     async def reconcile_counters(self) -> None:
         """
-        Reconcile Redis ws_cnt:{user_id} counters with in-process connection state.
+        Reconcile Redis ws_cnt:{user_id} counters across multi-process workers.
 
-        Under normal operation the incr/decr pair in connect_user/disconnect_user
-        keeps Redis in sync.  After a worker crash or SIGKILL those decrements are
-        never issued, so the counter drifts above the real connection count and
-        users get erroneously rejected.  This method corrects the drift by setting
-        each counter to the number of sockets currently held by this worker process.
+        In multi-process Uvicorn deployments (--workers > 1), each worker tracks
+        its active connections under a worker-scoped Redis key:
+            ws_worker:{user_id}:{self.worker_id} (TTL 600s)
 
-        It is intentionally conservative: it only touches keys for users this worker
-        knows about, so it cannot race with other workers' legitimate counters.
+        During reconciliation:
+        1. Each worker refreshes its worker-scoped counts with a 600s TTL.
+        2. We aggregate across all alive worker keys for each user and set the
+           global authoritative ws_cnt:{user_id} sum.
         """
         for user_id, sockets in list(self.user_connections.items()):
             actual = len(sockets)
-            cnt_key = f"ws_cnt:{user_id}"
-            try:
-                if actual == 0:
-                    await self._redis.delete(cnt_key)
-                    logger.debug("[heartbeat] Deleted stale ws_cnt key for user %s", user_id)
+            await self._update_worker_count(user_id, actual)
+
+        try:
+            keys = await self._redis.keys("ws_worker:*:*")
+            user_ids = set()
+            for k in keys:
+                parts = k.split(":")
+                if len(parts) >= 3:
+                    user_ids.add(parts[1])
+            user_ids.update(self.user_connections.keys())
+
+            for user_id in user_ids:
+                worker_keys = await self._redis.keys(f"ws_worker:{user_id}:*")
+                if worker_keys:
+                    counts = await asyncio.gather(*(self._redis.get(wk) for wk in worker_keys), return_exceptions=True)
+                    total = sum(int(c) for c in counts if isinstance(c, (int, str)) and str(c).isdigit())
+                    if total > 0:
+                        await self._redis.set(f"ws_cnt:{user_id}", total, ex=86400)
+                        logger.debug("[heartbeat] Reconciled global ws_cnt for user %s -> %d across %d workers", user_id, total, len(worker_keys))
+                    else:
+                        await self._redis.delete(f"ws_cnt:{user_id}")
                 else:
-                    await self._redis.set(cnt_key, actual, ex=86400)
-                    logger.debug("[heartbeat] Reconciled ws_cnt for user %s -> %d", user_id, actual)
-            except Exception:
-                logger.exception("[heartbeat] Failed to reconcile ws_cnt for user %s", user_id)
+                    await self._redis.delete(f"ws_cnt:{user_id}")
+        except Exception:
+            logger.exception("[heartbeat] Unexpected error during multi-worker counter aggregation")
+
+    async def _update_worker_count(self, user_id: str, count: int) -> None:
+        key = f"ws_worker:{user_id}:{self.worker_id}"
+        try:
+            if count > 0:
+                await self._redis.set(key, count, ex=600)
+            else:
+                await self._redis.delete(key)
+        except Exception:
+            pass
 
     async def _heartbeat_loop(self, interval_sec: int = 300) -> None:
         """Background coroutine that reconciles counters on a fixed interval."""

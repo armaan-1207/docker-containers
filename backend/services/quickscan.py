@@ -37,7 +37,15 @@ _CACHE_TTL_SECONDS = 300
 
 
 def _domain_from_url(url: str) -> str:
-    netloc = urlparse(url).netloc or url
+    parsed = urlparse(url)
+    if not parsed.netloc and not parsed.scheme:
+        parsed = urlparse("http://" + url)
+    hostname = parsed.hostname
+    if hostname:
+        return hostname.lower()
+    netloc = parsed.netloc or url
+    if "@" in netloc:
+        netloc = netloc.split("@")[-1]
     return netloc.split(":")[0].lower()
 
 

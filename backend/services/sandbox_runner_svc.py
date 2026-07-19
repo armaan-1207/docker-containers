@@ -160,9 +160,16 @@ async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
         if proc.returncode != 0:
             err_msg = stderr.decode(errors="ignore")[:2000]
             logger.error("[%s] Sandbox container exited %d: %s", scan_id, proc.returncode, err_msg)
+            if proc.returncode == 125 or "No such image" in err_msg or "not found" in err_msg.lower():
+                detail_msg = (
+                    f"Sandbox image '{SANDBOX_IMAGE}' not found locally or failed docker run check (exit code {proc.returncode}). "
+                    "You must run 'make pin-sandbox' (or 'python scripts/pin_sandbox.py') to build and pin the sandbox image before running scans."
+                )
+            else:
+                detail_msg = f"Sandbox exited with returncode {proc.returncode}: {err_msg}"
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Sandbox exited with returncode {proc.returncode}: {err_msg}",
+                detail=detail_msg,
             )
 
         out_msg = stdout.decode(errors="ignore")[:500]

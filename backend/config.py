@@ -323,6 +323,13 @@ if ":latest" in settings.SANDBOX_IMAGE or "@sha256:" not in settings.SANDBOX_IMA
         "Pin SANDBOX_IMAGE by immutable digest before running."
     )
 
+_PLACEHOLDER_SANDBOX_DIGEST = "aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c"
+if settings.is_production and settings.SANDBOX_IMAGE == _PLACEHOLDER_SANDBOX_DIGEST:
+    raise RuntimeError(
+        f"Secure-by-default check: SANDBOX_IMAGE ('{settings.SANDBOX_IMAGE}') is still set to the default placeholder digest. "
+        "You must run 'make pin-sandbox' (or 'python scripts/pin_sandbox.py') to build and pin the actual local sandbox image before running in production."
+    )
+
 if not settings.CLAMAV_FAIL_CLOSED and settings.is_production:
     raise RuntimeError(
         f"Secure-by-default check: CLAMAV_FAIL_CLOSED is False in '{settings.ENVIRONMENT}'. "
