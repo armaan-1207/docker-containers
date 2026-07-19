@@ -33,6 +33,9 @@ x-backend-common: &backend-common
     - REQUIRE_REAL_CERT=${REQUIRE_REAL_CERT:-false}
   volumes:
     - shared_scans:/shared/scans
+  # Python (FastAPI, Celery worker, Beat) requires read_only: false for runtime bytecode compilation
+  # (__pycache__) across dynamic module loads and Celery Beat schedule database synchronization.
+  # Hardening is enforced via non-root execution (UID 1001), cap_drop: [ALL], and no-new-privileges: true.
   read_only: false
   tmpfs:
     - /tmp
@@ -328,11 +331,17 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-      - /root/.docker
+      - /home/runner/.docker
     restart: unless-stopped
     depends_on:
       docker_socket_proxy:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8002/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     deploy:
       resources:
         limits:
@@ -376,8 +385,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      redis_security:
+        condition: service_healthy
       aegis_sandbox_runner:
-        condition: service_started
+        condition: service_healthy
       clamav:
         condition: service_healthy
     healthcheck:

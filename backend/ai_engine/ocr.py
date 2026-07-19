@@ -10,7 +10,7 @@ sandbox screenshots instead of two empty strings (which would always be
 indeterminate and always skipped from the consistency score).
 
 Requirements: pytesseract>=0.3.13, tesseract-ocr installed in the container.
-The backend Dockerfile already installs tesseract-ocr via apt-get.
+The backend Dockerfile.worker installs tesseract-ocr via apt-get (`extract_text` executes inside `celery_worker`).
 """
 
 import logging

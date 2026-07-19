@@ -15,7 +15,7 @@ Primary relational datastore for the AEGIS platform.
 | `iocs` | id, incident_id, ioc_type, value | Extracted indicators (IPs, domains, hashes) |
 | `statistics` | id=1, total_incidents, critical_count, high_count | Dashboard counters |
 
-## Extensions enabled (by `init.sql`)
+## Extensions enabled (by `init.sh`)
 - `uuid-ossp` — UUID primary key generation
 - `pg_trgm` — fuzzy text search on domains
 
@@ -35,7 +35,7 @@ postgresql+psycopg2://aegis_user:<SET_IN_ENV_AEGIS_DB_PASSWORD>@postgres:5432/ae
 ## Files
 | File | Purpose |
 |------|---------|
-| `init.sql` | Creates `aegis_user`, `aegis_db`, grants, extensions. Runs once on first boot. |
+| `init.sh` | Creates `aegis_user`, `aegis_db`, grants, extensions. Runs once on first boot. |
 
 ## Volumes
 - `postgres_data:/var/lib/postgresql/data` — persistent live database files

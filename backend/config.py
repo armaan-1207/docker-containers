@@ -36,7 +36,7 @@ Key security notes:
 
 import logging
 from typing import Optional, Literal
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, quote_plus
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -150,7 +150,7 @@ class Settings(BaseSettings):
         username = parsed.username or "aegis_user"
         host = parsed.hostname or "postgres"
         port = parsed.port or 5432
-        new_netloc = f"{username}:{password}@{host}:{port}"
+        new_netloc = f"{quote_plus(username)}:{quote_plus(password)}@{host}:{port}"
         return urlunparse((
             parsed.scheme,
             new_netloc,
@@ -193,7 +193,7 @@ class Settings(BaseSettings):
         # Build netloc as ":PASSWORD@host:port", then reconstruct full URL.
         host = parsed.hostname or "redis"
         port = parsed.port or 6379
-        new_netloc = f":{password}@{host}:{port}"
+        new_netloc = f":{quote_plus(password)}@{host}:{port}"
         return urlunparse((
             parsed.scheme,
             new_netloc,

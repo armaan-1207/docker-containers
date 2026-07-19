@@ -72,7 +72,8 @@ class DetonateResponse(BaseModel):
 @app.on_event("startup")
 async def verify_host_firewall_and_image():
     """
-    Check on startup if SANDBOX_IMAGE is pinned and test active network isolation.
+    Check on startup if SANDBOX_IMAGE is pinned, Docker Engine supports volume-subpath,
+    and test active network isolation.
     """
     is_prod = os.environ.get("ENVIRONMENT", "").lower() == "production"
     if is_prod and "454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c" in SANDBOX_IMAGE:
@@ -80,6 +81,37 @@ async def verify_host_firewall_and_image():
             "CRITICAL: SANDBOX_IMAGE is set to the default placeholder digest in production! "
             "Run 'make pin-sandbox' or 'python scripts/pin_sandbox.py' before starting."
         )
+
+    # Verify Docker Engine version supports volume-subpath (Docker Engine 24.0.0+)
+    try:
+        ver_proc = await asyncio.create_subprocess_exec(
+            "docker", "version", "--format", "{{.Server.Version}}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        ver_out, ver_err = await ver_proc.communicate()
+        if ver_proc.returncode == 0:
+            server_version = ver_out.decode().strip()
+            # Parse major version (e.g. "24.0.5" -> 24)
+            parts = re.split(r"[^0-9]", server_version)
+            major = int(parts[0]) if parts and parts[0].isdigit() else 0
+            if major > 0 and major < 24:
+                msg = (
+                    f"CRITICAL: Host Docker Engine version is {server_version} (< 24.0.0). "
+                    "AEGIS Stage 2 sandbox detonation requires volume-subpath mounts supported in Docker Engine 24.0+. "
+                    "Please upgrade the host Docker Engine."
+                )
+                logger.error(msg)
+                if is_prod:
+                    raise RuntimeError(msg)
+            else:
+                logger.info("[startup] Verified host Docker Engine version %s (supports volume-subpath).", server_version)
+        else:
+            logger.warning("[startup] Could not query Docker Server version: %s", ver_err.decode().strip())
+    except Exception as e:
+        if isinstance(e, RuntimeError):
+            raise
+        logger.debug("[startup] Could not check Docker Server version: %s", e)
 
     # Verify SANDBOX_IMAGE exists locally (now possible with IMAGES: 1 on docker_socket_proxy)
     try:
@@ -92,19 +124,27 @@ async def verify_host_firewall_and_image():
         if inspect_proc.returncode != 0:
             err_msg = inspect_err.decode().strip() or "Image not found"
             logger.warning("[startup] SANDBOX_IMAGE '%s' not found locally via Docker API (%s). Ensure it is built ('make pin-sandbox') before running scans.", SANDBOX_IMAGE, err_msg)
+            if is_prod:
+                raise RuntimeError(
+                    f"CRITICAL: SANDBOX_IMAGE '{SANDBOX_IMAGE}' not found locally via Docker API ({err_msg}). "
+                    "You must run 'make pin-sandbox' (or 'python scripts/pin_sandbox.py') before starting in production."
+                )
         else:
             logger.info("[startup] Verified SANDBOX_IMAGE '%s' exists locally.", SANDBOX_IMAGE)
     except Exception as e:
+        if isinstance(e, RuntimeError):
+            raise
         logger.debug("[startup] Could not verify SANDBOX_IMAGE presence via docker inspect: %s", e)
 
     try:
+        # Use SANDBOX_IMAGE for probe instead of busybox to ensure image availability
         cmd = [
             "docker", "run", "--rm",
             "--network", SANDBOX_NETWORK,
             "--cap-drop=ALL",
             "--security-opt", "no-new-privileges:true",
-            "busybox:1.36-uclibc@sha256:4b494676189cfad37ab1354363297a7e8bfdb3b4df9d1cf33efcddce02d0ecb2",
-            "sh", "-c", "nc -z -w 2 169.254.169.254 80 2>/dev/null"
+            SANDBOX_IMAGE,
+            "python3", "-c", "import socket; socket.create_connection(('169.254.169.254', 80), timeout=2)"
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -123,18 +163,28 @@ async def verify_host_firewall_and_image():
             logger.error(msg)
             if is_prod:
                 raise RuntimeError(msg)
-        elif proc.returncode == 1:
-            # returncode 1 from sh/nc means nc ran inside container but could not connect (timed out or refused by firewall)
-            logger.info("[startup] Host firewall / network isolation verified for %s (probe rejected with exit code 1)", SANDBOX_NETWORK)
+        elif proc.returncode != 0 and proc.returncode < 125:
+            # Non-zero (< 125) means python ran inside container but could not connect (ConnectionRefused/Timeout)
+            logger.info("[startup] Host firewall / network isolation verified for %s (probe rejected with exit code %s)", SANDBOX_NETWORK, proc.returncode)
         elif proc.returncode >= 125:
-            # 125=docker run failed, 126=cannot invoke, 127=command not found inside container (e.g. image not pulled or proxy denied)
+            # 125=docker run failed, 126=cannot invoke, 127=command not found inside container
             logger.warning("[startup] Active firewall probe skipped: docker container execution failed (return code %s): %s", proc.returncode, stderr_text)
+            if is_prod:
+                raise RuntimeError(
+                    f"CRITICAL: Active firewall probe failed to execute inside container (return code {proc.returncode}): {stderr_text}. "
+                    "Ensure 'make pin-sandbox' and 'sudo bash scripts/setup_host_firewall.sh' have run."
+                )
         else:
             logger.info("[startup] Host firewall / network isolation probe finished with code %s (%s)", proc.returncode, stderr_text)
     except Exception as e:
         if isinstance(e, RuntimeError):
             raise
         logger.debug("[startup] Could not run active firewall probe check (non-fatal): %s", e)
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 
 @app.post("/detonate", response_model=DetonateResponse)
@@ -228,7 +278,12 @@ async def detonate(request: DetonateRequest, x_runner_auth: str = Header(None)):
         if proc.returncode != 0:
             err_msg = stderr.decode(errors="ignore")[:2000]
             logger.error("[%s] Sandbox container exited %d: %s", scan_id, proc.returncode, err_msg)
-            if proc.returncode == 125 or "No such image" in err_msg or "not found" in err_msg.lower():
+            if "volume-subpath" in err_msg or "invalid mount option" in err_msg.lower() or "unknown flag: --mount" in err_msg.lower():
+                detail_msg = (
+                    f"Host Docker Engine does not support 'volume-subpath' mount option (requires Docker Engine >= 24.0.0). "
+                    f"Error: {err_msg}"
+                )
+            elif proc.returncode == 125 or "No such image" in err_msg or "not found" in err_msg.lower():
                 detail_msg = (
                     f"Sandbox image '{SANDBOX_IMAGE}' not found locally or failed docker run check (exit code {proc.returncode}). "
                     "You must run 'make pin-sandbox' (or 'python scripts/pin_sandbox.py') to build and pin the sandbox image before running scans."

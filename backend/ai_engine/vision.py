@@ -77,11 +77,14 @@ class BrandMatcher:
             return {"brand": best_brand, "similarity": round(best_similarity, 3)}
         return None
 
-# Load references once at startup (assuming backend runs relative to project root or uses absolute paths)
-# Try standard locations where reference_hashes.json might be depending on execution context.
+# Load references once at startup.
+# Look first in adjacent ai_engine directory where reference_hashes.json is baked during Docker builds,
+# falling back to ../../sandbox/backend/reference_hashes.json for local out-of-container dev runs.
+_local_reference = os.path.join(os.path.dirname(__file__), "reference_hashes.json")
+_fallback_reference = os.path.join(os.path.dirname(__file__), "../../sandbox/backend/reference_hashes.json")
 _REFERENCE_PATH = os.environ.get(
-    "BRAND_REFERENCE_JSON", 
-    os.path.join(os.path.dirname(__file__), "../../sandbox/backend/reference_hashes.json")
+    "BRAND_REFERENCE_JSON",
+    _local_reference if os.path.exists(_local_reference) else _fallback_reference,
 )
 try:
     _matcher = BrandMatcher.from_file(_REFERENCE_PATH)
