@@ -111,6 +111,8 @@ def _push_websocket_update(scan_id: str, payload: dict) -> None:
         logger.exception("[%s] WebSocket push failed (non-fatal)", scan_id)
 
 
+# ── Pipeline Stage (Diagram → Code) ──────────────────────────────────────────
+# Diagram Stage 3 (LightGBM Fusion) | Code internal name: "Stage 4 / risk_fusion"
 @celery.task(
     bind=True,
     name="tasks.risk_fusion",

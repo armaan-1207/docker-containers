@@ -59,6 +59,8 @@ def _load_json(path: str) -> dict:
         return json.load(f)
 
 
+# ── Pipeline Stage (Diagram → Code) ──────────────────────────────────────────
+# Diagram Stage N/A (Consistency) | Code internal name: "Stage 3 / consistency"
 @celery.task(
     bind=True,
     name="tasks.consistency",

@@ -69,10 +69,6 @@ except Exception as e:
     print(f"    -> FATAL: Authentication failed: {e}")
     sys.exit(1)
 
-# 3. Submit Stage 2 Scan
-target_url = args.url
-print(f"\n[3] Submitting Stage 2 scan payload for: {target_url}...")
-html_payload = f"<html><head><title>Scan Target</title></head><body><h1>Scan Test for {target_url}</h1></body></html>"
 stage2_payload = json.dumps({
     'url': target_url,
     'screenshot_base64': screenshot_b64,

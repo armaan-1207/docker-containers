@@ -245,6 +245,8 @@ def _call_sandbox(scan_id: str) -> dict:
     return sandbox_result
 
 
+# ── Pipeline Stage (Diagram → Code) ──────────────────────────────────────────
+# Diagram Stage 5 (Sandbox Detonation) | Code internal name: "Stage 2 / sandbox_analysis"
 @celery.task(
     bind=True,
     name="tasks.sandbox_analysis",

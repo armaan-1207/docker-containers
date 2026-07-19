@@ -113,6 +113,8 @@ def _send_slack_notification(scan_id: str, risk_report: dict) -> None:
 from tasks import validate_scan_id
 
 
+# ── Pipeline Stage (Diagram → Code) ──────────────────────────────────────────
+# Diagram Stage N/A (Alerts) | Code internal name: "Stage 5 / alert_pipeline"
 @celery.task(
     bind=True,
     name="tasks.alert_pipeline",

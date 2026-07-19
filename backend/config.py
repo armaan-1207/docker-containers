@@ -245,7 +245,7 @@ class Settings(BaseSettings):
     INCIDENT_RETENTION_DAYS: int = 365
 
     SANDBOX_NETWORK: Optional[str] = "aegis_sandbox_net"
-    SANDBOX_IMAGE: str = "aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c"
+    SANDBOX_IMAGE: str = "aegis-sandbox@sha256:74aaa52be1a8f5a00e462a0b3ec7b2c2dbc108ff46fd02d6fde36de69d12acf5"
     SANDBOX_RUNNER_SECRET: str = ""
     SHARED_SCANS_VOLUME: Optional[str] = "aegis_shared_scans"
     SANDBOX_TIMEOUT_SEC: int = 120
@@ -272,6 +272,7 @@ class Settings(BaseSettings):
     LOW_THRESHOLD: int = 40
     MEDIUM_THRESHOLD: int = 70
     HIGH_THRESHOLD: int = 85
+    SANDBOX_PRELIMINARY_THRESHOLD: int = 25
     LOG_LEVEL: str = "INFO"
 
     # Trusted Domain Allowlist (`quickscan.py` finding #11)

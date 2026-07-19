@@ -141,6 +141,35 @@ def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Response:
     except OSError:
         pass
 
+    # ── CyberIntel Early Gate ─────────────────────────────────────────────
+    from cyberintel.runner import run_cyberintel
+    import json
+    
+    try:
+        cyberintel = run_cyberintel(url)
+        iocs = cyberintel.get("iocs", [])
+        ci_score = 100 if iocs else 0
+        
+        if ci_score >= 75:
+            block_path = os.path.join(scan_dir, "cyberintel_block.json")
+            with open(block_path, "w") as f:
+                json.dump(cyberintel, f, indent=2, default=str)
+                
+            scan.status = "blocked_by_cyberintel"
+            scan.severity = "CRITICAL"
+            scan.risk_score = ci_score
+            db.commit()
+            
+            return Stage2Response(
+                scan_id=scan_id,
+                job_id="blocked_by_cyberintel",
+                status="COMPLETE",
+                url=url,
+                screenshot_saved_path=None
+            )
+    except Exception as exc:
+        logger.warning("[%s] CyberIntel early gate failed, proceeding anyway: %s", scan_id, exc)
+
     # ── Persist validated artifacts ───────────────────────────────────────
     png_path = os.path.join(scan_dir, "browser.png")
     with open(png_path, "wb") as f:

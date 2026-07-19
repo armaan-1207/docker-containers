@@ -14,6 +14,7 @@ from config import settings
 
 from schemas.quick_scan import QuickScanRequest, QuickScanResponse
 from schemas.stage2 import Stage2Request, Stage2Response
+from schemas.full_scan import FullScanRequest, FullScanResponse
 
 from services.quickscan import run_quickscan
 from services.stage2_analysis import run_stage2_analysis, _validate_scan_id, _scan_dir
@@ -76,6 +77,63 @@ def quick_scan(
         )
 
     return result
+
+
+@router.post("/full", response_model=FullScanResponse)
+def full_scan(
+    payload: FullScanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    url_str = str(payload.url)
+    
+    # 1. Quick cache check
+    quick_result = run_quickscan(payload=QuickScanRequest(url=url_str), user=current_user, db=db)
+    qr_dict = quick_result if isinstance(quick_result, dict) else quick_result.model_dump()
+    if qr_dict.get("status") == "cached":
+        return FullScanResponse(
+            scan_id="cached", job_id="cached", status="COMPLETE",
+            url=url_str, captured_by="server",
+            screenshot_saved_path=None
+        )
+        
+    # 2. Server-side capture
+    from services.capture import capture_url
+    import base64
+    
+    png_bytes, html_content = capture_url(url_str)
+    b64_png = base64.b64encode(png_bytes).decode('ascii')
+    
+    # 3. Call stage2_analysis natively
+    stage2_req = Stage2Request(
+        url=payload.url,
+        screenshot_base64=b64_png,
+        html=html_content,
+        tab_id=None
+    )
+    
+    try:
+        st2_resp = run_stage2_analysis(payload=stage2_req, user=current_user, db=db)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Full scan failed for url=%s user_id=%s", url_str, current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Full scan failed. Please try again shortly.",
+        )
+    
+    return FullScanResponse(
+        scan_id=st2_resp.scan_id,
+        job_id=st2_resp.job_id,
+        status=st2_resp.status,
+        url=st2_resp.url,
+        screenshot_saved_path=st2_resp.screenshot_saved_path,
+        queued_at=st2_resp.queued_at,
+        captured_by="server"
+    )
 
 
 @router.post("/stage2", response_model=Stage2Response)

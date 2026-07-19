@@ -41,6 +41,8 @@ def _mark_status(scan_id: str, status: str) -> None:
         logger.exception("Failed to update scan status to %s for %s", status, scan_id)
 
 
+# ── Pipeline Stage (Diagram → Code) ──────────────────────────────────────────
+# Diagram Stage 2 (Visual+OCR+DOM) | Code internal name: "Stage 1 / browser_features"
 @celery.task(
     bind=True,
     name="tasks.browser_features",
@@ -104,11 +106,38 @@ def browser_features_task(self, scan_id: str):
     logger.info("[%s] browser_features.json written", scan_id)
     _mark_status(scan_id, "browser_features_done")
 
+    # ── Conditional Sandbox Dispatch (Change #2) ──────────────────────────────
+    preliminary_score = 0
+    if dom_features.get("script_count", 0) > 10:
+        preliminary_score += 20
+    if dom_features.get("form_count", 0) > 0:
+        preliminary_score += 15
+    if dom_features.get("external_link_count", 0) > 20:
+        preliminary_score += 10
+        
+    phishing_keywords = {"login", "password", "account", "verify", "secure", "update", "signin"}
+    ocr_lower = (ocr_text or "").lower()
+    if any(kw in ocr_lower for kw in phishing_keywords):
+        preliminary_score += 30
+        
     from tasks.sandbox_analysis import sandbox_analysis_task
-    try:
-        sandbox_analysis_task.delay(scan_id)
-    except Exception:
-        logger.exception("[%s] Failed to dispatch sandbox_analysis_task", scan_id)
-        _mark_status(scan_id, "sandbox_analysis_dispatch_failed")
+    from tasks.consistency import consistency_task
+
+    threshold = getattr(settings, "SANDBOX_PRELIMINARY_THRESHOLD", 0)
+    
+    if threshold == 0 or preliminary_score >= threshold:
+        try:
+            logger.info("[%s] Preliminary score %s >= %s, dispatching sandbox", scan_id, preliminary_score, threshold)
+            sandbox_analysis_task.delay(scan_id)
+        except Exception:
+            logger.exception("[%s] Failed to dispatch sandbox_analysis_task", scan_id)
+            _mark_status(scan_id, "sandbox_analysis_dispatch_failed")
+    else:
+        try:
+            logger.info("[%s] Preliminary score %s < %s, skipping sandbox and going to consistency_task", scan_id, preliminary_score, threshold)
+            consistency_task.delay(scan_id)
+        except Exception:
+            logger.exception("[%s] Failed to dispatch consistency_task", scan_id)
+            _mark_status(scan_id, "consistency_dispatch_failed")
 
     return {"scan_id": scan_id, "status": "browser_features_done"}
