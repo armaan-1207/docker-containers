@@ -103,6 +103,10 @@ def browser_features_task(self, scan_id: str):
     _mark_status(scan_id, "browser_features_done")
 
     from tasks.sandbox_analysis import sandbox_analysis_task
-    sandbox_analysis_task.delay(scan_id)
+    try:
+        sandbox_analysis_task.delay(scan_id)
+    except Exception:
+        logger.exception("[%s] Failed to dispatch sandbox_analysis_task", scan_id)
+        _mark_status(scan_id, "sandbox_analysis_dispatch_failed")
 
     return {"scan_id": scan_id, "status": "browser_features_done"}

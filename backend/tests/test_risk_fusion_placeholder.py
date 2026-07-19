@@ -17,7 +17,7 @@ def test_risk_fusion_placeholder_suppresses_alert_dispatch(
     if is_placeholder=True, the alert_pipeline_task is NEVER dispatched.
     This prevents fake alerts from spamming Slack and polluting the database.
     """
-    scan_id = "12345678-1234-1234-1234-123456789012"
+    scan_id = "12345678-1234-4234-a234-123456789012"
     
     # Mock file operations via patching _scan_dir and _load_json
     with patch("tasks.risk_fusion._scan_dir", return_value=str(tmp_path)), \
@@ -54,7 +54,7 @@ def test_risk_fusion_real_model_dispatches_alert(
     Ensures that when a real model (is_placeholder=False) generates a HIGH/CRITICAL
     severity score, the alert_pipeline_task IS correctly dispatched.
     """
-    scan_id = "87654321-4321-4321-4321-210987654321"
+    scan_id = "87654321-4321-4321-9210-210987654321"
     
     with patch("tasks.risk_fusion._scan_dir", return_value=str(tmp_path)), \
          patch("tasks.risk_fusion._load_json", return_value={}), \

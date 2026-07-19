@@ -130,6 +130,10 @@ def consistency_task(self, scan_id: str):
     _mark_status(scan_id, "consistency_done")
 
     from tasks.risk_fusion import risk_fusion_task
-    risk_fusion_task.delay(scan_id)
+    try:
+        risk_fusion_task.delay(scan_id)
+    except Exception:
+        logger.exception("[%s] Failed to dispatch risk_fusion_task", scan_id)
+        _mark_status(scan_id, "risk_fusion_dispatch_failed")
 
     return {"scan_id": scan_id, "status": "consistency_done"}

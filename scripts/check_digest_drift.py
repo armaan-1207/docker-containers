@@ -15,29 +15,32 @@ def get_digest(content, pattern):
         return None
     return match.group(1)
 
+_SANDBOX_IMAGE_PATTERN = r'aegis-sandbox(?::[^\s@]+)?@sha256:[a-f0-9]{64}'
+
+
 def main():
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     files_to_check = {
         "backend/.env.example": (
             os.path.join(root_dir, "backend", ".env.example"),
-            r'SANDBOX_IMAGE=(aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64})'
+            rf'SANDBOX_IMAGE=({_SANDBOX_IMAGE_PATTERN})'
         ),
         "docker-compose.yml (runner)": (
             os.path.join(root_dir, "docker-compose.yml"),
-            r'SANDBOX_IMAGE:\s*\$\{SANDBOX_IMAGE:-(aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64})\}'
+            rf'SANDBOX_IMAGE:\s*\$\{{SANDBOX_IMAGE:-({_SANDBOX_IMAGE_PATTERN})\}}'
         ),
         "docker-compose.yml (sandbox)": (
             os.path.join(root_dir, "docker-compose.yml"),
-            r'image:\s*\$\{SANDBOX_IMAGE:-(aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64})\}'
+            rf'image:\s*\$\{{SANDBOX_IMAGE:-({_SANDBOX_IMAGE_PATTERN})\}}'
         ),
         "backend/config.py": (
             os.path.join(root_dir, "backend", "config.py"),
-            r'SANDBOX_IMAGE:\s*str\s*=\s*"(aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64})"'
+            rf'SANDBOX_IMAGE:\s*str\s*=\s*"({_SANDBOX_IMAGE_PATTERN})"'
         ),
         "backend/services/sandbox_runner_svc.py": (
             os.path.join(root_dir, "backend", "services", "sandbox_runner_svc.py"),
-            r'SANDBOX_IMAGE\s*=\s*os\.environ\.get\(\s*"SANDBOX_IMAGE",\s*"(aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64})"'
+            rf'SANDBOX_IMAGE\s*=\s*os\.environ\.get\(\s*"SANDBOX_IMAGE",\s*"({_SANDBOX_IMAGE_PATTERN})"'
         )
     }
 

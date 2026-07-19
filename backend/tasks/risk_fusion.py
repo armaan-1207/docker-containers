@@ -210,7 +210,11 @@ def risk_fusion_task(self, scan_id: str):
     is_placeholder = risk_report.get("is_placeholder", True)  # fail closed: unknown -> treat as placeholder
     if risk_report.get("severity") in ALERT_SEVERITIES and not is_placeholder:
         from tasks.alert_pipeline import alert_pipeline_task
-        alert_pipeline_task.delay(scan_id, risk_report)
+        try:
+            alert_pipeline_task.delay(scan_id, risk_report)
+        except Exception:
+            logger.exception("[%s] Failed to dispatch alert_pipeline_task", scan_id)
+            _mark_status(scan_id, "alert_pipeline_dispatch_failed")
     elif risk_report.get("severity") in ALERT_SEVERITIES and is_placeholder:
         logger.info(
             "[%s] severity=%s but is_placeholder=True -- suppressing alert_pipeline "

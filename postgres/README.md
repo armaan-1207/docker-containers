@@ -39,23 +39,28 @@ postgresql+psycopg2://aegis_user:<SET_IN_ENV_AEGIS_DB_PASSWORD>@postgres:5432/ae
 
 ## Volumes
 - `postgres_data:/var/lib/postgresql/data` — persistent live database files
-- `postgres_backups:/var/backups/postgresql` — isolated volume dedicated to database dumps (protects backups from live volume corruption)
+- `db_backups:/backups` — dedicated volume for automated logical backups (`aegis_db_backups`)
 
 ## Backup & Retention Strategy
-To ensure disaster recovery (DR) preparedness without overflowing host disk space or risking backup loss if primary data corrupts:
+Automated backups are handled by Celery Beat and executed inside `celery_worker` (which includes `postgresql-client`).
 
 ### 1. Automated Daily Backups (`pg_dump`)
-Run daily logical backups using cron or Windows Task Scheduler executing inside the container against the dedicated `/var/backups/postgresql/` mount:
+- **Scheduler:** Celery Beat task `daily-db-backup` (`tasks.db_backup`) runs daily at **03:00 UTC**
+- **Executor:** `celery_worker` runs `pg_dump -F c -b -v` against `postgres:5432`
+- **Storage:** Compressed dumps are written to the `aegis_db_backups` Docker volume, mounted at **`/backups`** in `celery_worker`
+- **Filename pattern:** `aegis_db_YYYYMMDD_HHMMSS.dump`
+- **Authentication:** Uses a temporary `.pgpass` file with `AEGIS_DB_PASSWORD` (never logged or committed)
+
+Manual one-off backup (same format as the automated job):
 ```powershell
-docker exec aegis_postgres pg_dump -U aegis_user -F c -b -v -f /var/backups/postgresql/aegis_db_$(date +%Y%m%d_%H%M%S).dump aegis_db
+docker exec aegis_celery_worker pg_dump -h postgres -U aegis_user -F c -b -v -f /backups/aegis_db_manual.dump aegis_db
 ```
+
 For production deployments requiring minimal RPO (Recovery Point Objective), enable Write-Ahead Log (WAL) archiving (`archive_mode = on` / `pg_waldump`) with `pg_basebackup` for Point-In-Time Recovery (PITR). Note: Regularly verify restores (`pg_restore -C -d postgres ...`) on staging to validate integrity.
 
 ### 2. Retention Policy
-- **Daily Backups:** Retain for **7 days** locally or in encrypted cloud object storage (AWS S3 / GCP Cloud Storage with lifecycle policies).
-- **Weekly Snapshots:** Retain 1 snapshot per week for **4 weeks**.
-- **Monthly Snapshots:** Retain 1 snapshot per month for **1 year** (compliance audit requirements).
-- **Scan Artifact & DB Record Retention (`file_cleanup` task):** Shared volume scan files (`/shared/scans/<scan_id>/`) and corresponding database records (`scans` and `incidents` tables) are automatically purged by Celery Beat's `tasks.file_cleanup` job after **14 days** by default (`RETENTION_DAYS=14`), preventing disk and database exhaustion.
+- **Automated DB backups:** Retain for **7 days** (default `retention_days=7` in `tasks.db_backup`; expired files under `/backups/aegis_db_*.dump` are pruned automatically)
+- **Scan artifact & DB record retention (`file_cleanup` task):** Shared volume scan files (`/shared/scans/<scan_id>/`) and corresponding database records (`scans` and `incidents` tables) are automatically purged by Celery Beat's `tasks.file_cleanup` job after **14 days** by default (`ARTIFACT_RETENTION_DAYS=14`), preventing disk and database exhaustion.
 
 ## Useful commands
 ```powershell

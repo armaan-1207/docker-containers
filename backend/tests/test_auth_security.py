@@ -51,3 +51,11 @@ def test_revoke_token_sets_redis_blacklist():
         args = mock_redis.setex.call_args[0]
         assert args[0].startswith("jwt_blacklist:")
         assert args[2] == "revoked"
+
+
+def test_decode_token_fails_closed_when_redis_unavailable():
+    token = create_access_token({"sub": "user_4"})
+
+    with patch.object(jwt_module, "_redis_client", None):
+        with pytest.raises(JWTError, match="Authentication store unavailable"):
+            decode_access_token(token)

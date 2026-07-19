@@ -198,7 +198,6 @@ services:
       AEGIS_DB_PASSWORD: ${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - postgres_backups:/var/backups/postgresql
       - ./postgres/init.sh:/docker-entrypoint-initdb.d/01_init.sh:ro
     networks:
       - aegis_net
@@ -307,7 +306,6 @@ services:
       SHARED_SCANS_VOLUME: aegis_shared_scans
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c}
       SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:?SANDBOX_RUNNER_SECRET must be set in .env}
-      PROXY_BASIC_AUTH: ${PROXY_BASIC_AUTH:?PROXY_BASIC_AUTH must be set in .env}
       MAX_CONCURRENT_DETONATIONS: "10"
     networks:
       - aegis_net          # celery_worker communicates here via RPC
@@ -455,7 +453,7 @@ services:
     build:
       context: ./sandbox
       dockerfile: docker/Dockerfile
-    image: ${SANDBOX_IMAGE:-aegis-sandbox:v1.0.0@sha256:45b23deeeec969acba3ef1ba0f7ee7cd8312e75e921ebad966d58dc787943cc9}
+    image: ${SANDBOX_IMAGE:-aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c}
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # --- Security notice (Volume Scoping & Isolation - Finding #3) ---
@@ -503,9 +501,6 @@ volumes:
   postgres_data:
     driver: local
     name: aegis_postgres_data
-  postgres_backups:
-    driver: local
-    name: aegis_postgres_backups
   db_backups:
     driver: local
     name: aegis_db_backups

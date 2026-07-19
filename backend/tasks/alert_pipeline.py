@@ -123,6 +123,7 @@ from tasks import validate_scan_id
 )
 def alert_pipeline_task(self, scan_id: str, risk_report: dict):
     validate_scan_id(scan_id)
+    _mark_status(scan_id, "alert_pipeline_running")
     logger.info(
         "[%s] Stage 5 (alert_pipeline) started - severity=%s",
         scan_id,

@@ -311,7 +311,11 @@ def sandbox_analysis_task(self, scan_id: str):
     _mark_status(scan_id, "sandbox_analysis_done")
 
     from tasks.consistency import consistency_task
-    consistency_task.delay(scan_id)
+    try:
+        consistency_task.delay(scan_id)
+    except Exception:
+        logger.exception("[%s] Failed to dispatch consistency_task", scan_id)
+        _mark_status(scan_id, "consistency_dispatch_failed")
 
     return {"scan_id": scan_id, "status": "sandbox_analysis_done"}
 

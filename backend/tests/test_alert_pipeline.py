@@ -17,7 +17,7 @@ def test_alert_pipeline_aborts_if_placeholder(
     a risk_report that has is_placeholder=True, the task aborts before touching
     the database or sending a Slack notification. (Defense-in-depth)
     """
-    scan_id = "12345678-1234-1234-1234-123456789012"
+    scan_id = "12345678-1234-4234-a234-123456789012"
     risk_report = {
         "severity": "CRITICAL",
         "risk_score": 95.0,
@@ -48,7 +48,7 @@ def test_alert_pipeline_proceeds_if_real_model(
     Ensures that alert_pipeline_task processes real (is_placeholder=False) reports
     and triggers DB inserts and Slack notifications.
     """
-    scan_id = "87654321-4321-4321-4321-210987654321"
+    scan_id = "87654321-4321-4321-9210-210987654321"
     risk_report = {
         "severity": "HIGH",
         "risk_score": 80.0,

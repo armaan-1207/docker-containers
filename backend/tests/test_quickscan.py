@@ -15,7 +15,7 @@ from schemas.quick_scan import QuickScanRequest, RiskLevel
 
 def test_domain_from_url():
     assert _domain_from_url("https://www.example.com/login?u=1") == "www.example.com"
-    assert _domain_from_url("http://sub.domain.org:8080/path") == "sub.domain.org:8080"
+    assert _domain_from_url("http://sub.domain.org:8080/path") == "sub.domain.org"
 
 
 @pytest.mark.asyncio

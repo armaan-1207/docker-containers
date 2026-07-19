@@ -76,10 +76,12 @@ def main():
         print(f"[pin-sandbox] Successfully updated SANDBOX_IMAGE in {target_path} to {digest}")
 
     # Also update code fallback defaults in docker-compose.yml, config.py, and sandbox_runner_svc.py
+    _digest_pattern = r'aegis-sandbox(?::[^\s@]+)?@sha256:[a-f0-9]{64}'
     code_targets = [
-        (os.path.join(root_dir, "docker-compose.yml"), r'(SANDBOX_IMAGE:\s*\$\{SANDBOX_IMAGE:-)aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64}(\})', rf'\g<1>{digest}\g<2>'),
-        (os.path.join(root_dir, "backend", "config.py"), r'(SANDBOX_IMAGE:\s*str\s*=\s*")aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64}(")', rf'\g<1>{digest}\g<2>'),
-        (os.path.join(root_dir, "backend", "services", "sandbox_runner_svc.py"), r'("SANDBOX_IMAGE",\s*")aegis-sandbox:[^\s]+@sha256:[a-f0-9]{64}(")', rf'\g<1>{digest}\g<2>')
+        (os.path.join(root_dir, "docker-compose.yml"), rf'(SANDBOX_IMAGE:\s*\$\{{SANDBOX_IMAGE:-){_digest_pattern}(\}})', rf'\g<1>{digest}\g<2>'),
+        (os.path.join(root_dir, "docker-compose.yml"), rf'(image:\s*\$\{{SANDBOX_IMAGE:-){_digest_pattern}(\}})', rf'\g<1>{digest}\g<2>'),
+        (os.path.join(root_dir, "backend", "config.py"), rf'(SANDBOX_IMAGE:\s*str\s*=\s*"){_digest_pattern}(")', rf'\g<1>{digest}\g<2>'),
+        (os.path.join(root_dir, "backend", "services", "sandbox_runner_svc.py"), rf'("SANDBOX_IMAGE",\s*"){_digest_pattern}(")', rf'\g<1>{digest}\g<2>')
     ]
     for target_path, pattern, repl in code_targets:
         if os.path.exists(target_path):

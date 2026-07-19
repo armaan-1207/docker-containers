@@ -32,9 +32,9 @@ async def test_stage2_malware_rejection():
 
     mock_db = MagicMock()
     mock_scan = MagicMock()
-    mock_scan.id = "12345678-1234-1234-1234-123456789abc"
+    mock_scan.id = "12345678-1234-4234-a234-123456789abc"
     mock_db.add.side_effect = lambda obj: None
-    mock_db.refresh.side_effect = lambda obj: setattr(obj, "id", "12345678-1234-1234-1234-123456789abc")
+    mock_db.refresh.side_effect = lambda obj: setattr(obj, "id", "12345678-1234-4234-a234-123456789abc")
 
     # Mock ClamAV detecting malware on browser.html
     with patch("services.stage2_analysis.scan_file_clamav", side_effect=[(True, "Clean"), (False, "Win.Trojan.Phish FOUND")]):

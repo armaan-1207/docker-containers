@@ -13,7 +13,7 @@ import tasks.sandbox_analysis as sandbox_module
 
 
 def test_glob_fallback_disabled_by_default(tmp_path):
-    scan_id = "12345678-1234-1234-1234-123456789abc"
+    scan_id = "12345678-1234-4234-a234-123456789abc"
     # Create a candidate file in root that matches request_id via glob
     candidate_path = tmp_path / "scan_candidate.json"
     candidate_data = {"scans": {"request_id": scan_id}}
@@ -26,7 +26,7 @@ def test_glob_fallback_disabled_by_default(tmp_path):
 
 
 def test_glob_fallback_enabled(tmp_path):
-    scan_id = "12345678-1234-1234-1234-123456789abc"
+    scan_id = "12345678-1234-4234-a234-123456789abc"
     # Create exact path location that does NOT exist
     # and candidate file in root that matches via glob
     candidate_path = tmp_path / "scan_candidate.json"

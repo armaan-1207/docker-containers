@@ -51,8 +51,10 @@ def decode_access_token(token: str) -> dict:
         audience="aegis-clients",
     )
     jti = payload.get("jti")
-    if jti and _redis_client:
+    if jti:
         try:
+            if not _redis_client:
+                raise redis.exceptions.RedisError("Redis client not initialized")
             if _redis_client.get(f"jwt_blacklist:{jti}"):
                 raise JWTError("Token has been revoked")
         except redis.exceptions.RedisError as e:
