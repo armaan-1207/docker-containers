@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     CLAMAV_PORT: int = 3310
     CLAMAV_FAIL_CLOSED: bool = True
     JWT_REVOCATION_FAIL_CLOSED: bool = True
+    JWT_ISSUER: str = "aegis-auth-v1"
+    SUPERUSER_EMAILS: list[str] = []
+    HIBP_FAIL_CLOSED: bool = False
     MAX_LOGIN_ATTEMPTS: int = 5
     LOCKOUT_DURATION_SECONDS: int = 900  # 15 minutes
     AUTH_LOCKOUT_FAIL_CLOSED: bool = True

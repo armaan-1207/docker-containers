@@ -121,7 +121,7 @@ services:
       uvicorn main:app
       --host 0.0.0.0
       --port 8000
-      --workers 2
+      --workers ${WORKER_COUNT:-2}
       --log-level info
       --proxy-headers
       --forwarded-allow-ips='*'
@@ -429,7 +429,7 @@ services:
       - shared_scans:/shared/scans
       - celery_beat_data:/app/celerybeat-schedule
     healthcheck:
-      test: ["CMD-SHELL", "test -f /app/celerybeat-schedule/celerybeat-schedule || test -f /tmp/.celery-beat-alive"]
+      test: ["CMD-SHELL", "test -f /app/celerybeat-schedule/celerybeat-schedule"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -504,7 +504,7 @@ services:
     build:
       context: ./sandbox
       dockerfile: docker/Dockerfile
-    image: ${SANDBOX_DEBUG_IMAGE:-aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c}
+    image: ${SANDBOX_DEBUG_IMAGE:-aegis-sandbox:local}
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # --- Security notice (Volume Scoping & Isolation - Finding #3) ---

@@ -33,7 +33,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         "jti": str(uuid.uuid4()),
         "exp": expire,
         "iat": datetime.now(timezone.utc),
-        "iss": settings.APP_NAME,
+        "iss": getattr(settings, "JWT_ISSUER", settings.APP_NAME),
         "aud": "aegis-clients",
     })
 
@@ -47,7 +47,7 @@ def decode_access_token(token: str) -> dict:
         token,
         SECRET_KEY,
         algorithms=[ALGORITHM],
-        issuer=settings.APP_NAME,
+        issuer=getattr(settings, "JWT_ISSUER", settings.APP_NAME),
         audience="aegis-clients",
     )
     jti = payload.get("jti")
@@ -73,7 +73,7 @@ def revoke_token(token: str) -> bool:
             token,
             SECRET_KEY,
             algorithms=[ALGORITHM],
-            issuer=settings.APP_NAME,
+            issuer=getattr(settings, "JWT_ISSUER", settings.APP_NAME),
             audience="aegis-clients",
             options={"verify_exp": False}
         )

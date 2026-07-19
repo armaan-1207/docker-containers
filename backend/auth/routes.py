@@ -60,10 +60,16 @@ def register(
     Conflict — so that unauthenticated callers cannot determine whether a
     given email address already exists in the system (security finding #6).
     """
-    if check_pwned_password(payload.password):
+    try:
+        if check_pwned_password(payload.password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password has appeared in public data breaches (k-anonymity HIBP check). Please choose a unique, unbreached password.",
+            )
+    except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password has appeared in public data breaches (k-anonymity HIBP check). Please choose a unique, unbreached password.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
         )
 
     email = (payload.email or "").lower().strip()

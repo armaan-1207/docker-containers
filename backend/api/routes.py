@@ -60,6 +60,8 @@ def quick_scan(
         result = run_quickscan(payload=payload, user=current_user, db=db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception:
         # Full details go to the server log only -- a raw str(e) in the
         # HTTP response can leak internal paths, DB errors, or stack
@@ -97,6 +99,8 @@ def stage2_scan(
         result = run_stage2_analysis(payload=payload, user=current_user, db=db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception:
         logger.exception(
             "Stage 2 scan failed for url=%s user_id=%s", payload.url, current_user.id

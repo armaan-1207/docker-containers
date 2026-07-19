@@ -18,8 +18,7 @@ def test_domain_from_url():
     assert _domain_from_url("http://sub.domain.org:8080/path") == "sub.domain.org"
 
 
-@pytest.mark.asyncio
-async def test_run_quickscan_cache_hit():
+def test_run_quickscan_cache_hit():
     mock_redis = MagicMock()
     cached_data = {
         "url": "https://cached.com",
@@ -40,7 +39,7 @@ async def test_run_quickscan_cache_hit():
     mock_user = MagicMock()
     
     with patch.object(quickscan_module, "_redis_client", mock_redis):
-        response = await run_quickscan(payload, mock_user, mock_db)
+        response = run_quickscan(payload, mock_user, mock_db)
         assert response.cached is True
         assert response.domain == "cached.com"
         assert response.risk_level == RiskLevel.LOW
@@ -49,8 +48,7 @@ async def test_run_quickscan_cache_hit():
         mock_db.add.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_run_quickscan_placeholder_not_cached():
+def test_run_quickscan_placeholder_not_cached():
     mock_redis = MagicMock()
     mock_redis.get.return_value = None
     
@@ -70,7 +68,7 @@ async def test_run_quickscan_placeholder_not_cached():
     
     with patch.object(quickscan_module, "_redis_client", mock_redis):
         with patch("services.quickscan.run_risk_fusion", return_value=mock_fusion_result):
-            response = await run_quickscan(payload, mock_user, mock_db)
+            response = run_quickscan(payload, mock_user, mock_db)
             assert response.cached is False
             assert response.is_placeholder is True
             assert response.risk_level == RiskLevel.MEDIUM
@@ -84,8 +82,7 @@ async def test_run_quickscan_placeholder_not_cached():
             mock_redis.setex.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_run_quickscan_real_score_is_cached():
+def test_run_quickscan_real_score_is_cached():
     mock_redis = MagicMock()
     mock_redis.get.return_value = None
     
@@ -105,7 +102,7 @@ async def test_run_quickscan_real_score_is_cached():
     
     with patch.object(quickscan_module, "_redis_client", mock_redis):
         with patch("services.quickscan.run_risk_fusion", return_value=mock_fusion_result):
-            response = await run_quickscan(payload, mock_user, mock_db)
+            response = run_quickscan(payload, mock_user, mock_db)
             assert response.cached is False
             assert response.is_placeholder is False
             assert response.risk_level == RiskLevel.HIGH

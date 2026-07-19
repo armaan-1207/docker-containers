@@ -1178,6 +1178,9 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
 
                 resp_map = {e["url"]: e for e in responses}
                 network_rows = []
+                is_network_truncated = len(requests) > 100
+                if is_network_truncated:
+                    logger.warning("Scan %s network requests truncated from %d to 100", scan_id, len(requests))
                 for req in requests[:100]:
                     resp_data = resp_map.get(req["url"], {})
                     network_rows.append({
@@ -1350,6 +1353,7 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
             "xhr_request_count": xhr_request_count,
             "websocket_connection_count": websocket_connection_count,
             "fingerprinting_api_count": counters.get("fingerprinting_api_count", 0),
+            "is_truncated": is_network_truncated,
             "rows": network_rows,
         },
         "browser_events": {

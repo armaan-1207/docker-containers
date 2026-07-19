@@ -99,7 +99,7 @@ class ConsistencyEngine:
         }
 
     def compare_dom(self, browser_dom: dict, sandbox_html_path: str,
-                    sandbox_html_available: bool = True) -> dict:
+                    sandbox_html_available: bool = True, final_url: str = "") -> dict:
         """Compare browser DOM features against sandbox DOM features.
 
         Args:
@@ -110,6 +110,7 @@ class ConsistencyEngine:
                 produce an independent HTML snapshot (current architecture).
                 Returns indeterminate=True so the DOM channel is excluded
                 from the weighted consistency score.
+            final_url: The final URL after redirects, needed by extract_features.
         """
         if not sandbox_html_available:
             # Sandbox never wrote sandbox.html — DOM comparison impossible.
@@ -123,7 +124,7 @@ class ConsistencyEngine:
             }
 
         try:
-            sandbox_dom = extract_features(sandbox_html_path)
+            sandbox_dom = extract_features(sandbox_html_path, final_url=final_url)
         except Exception:
             logger.exception("Sandbox DOM extraction failed")
             sandbox_dom = {}
@@ -271,6 +272,7 @@ class ConsistencyEngine:
         # channel is excluded from the weighted consistency score.
         sandbox_html_available = sandbox_artifacts.get("sandbox_html_available", True)
 
+        final_url = browser_dom.get("final_url", "") or sandbox_metadata.get("final_url", "")
         comparisons = {
             "screenshot": self.compare_screenshots(
                 browser_artifacts["png_path"], sandbox_png_path
@@ -279,6 +281,7 @@ class ConsistencyEngine:
             "dom": self.compare_dom(
                 browser_dom, sandbox_html_path,
                 sandbox_html_available=sandbox_html_available,
+                final_url=final_url,
             ),
             "metadata": self.compare_metadata(browser_dom, sandbox_metadata),
             "logo": self.compare_logo(browser_vision, sandbox_png_path),

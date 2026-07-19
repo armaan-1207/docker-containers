@@ -340,6 +340,8 @@ def _save_telemetry_to_postgres(scan_id: str, sandbox_result: dict) -> None:
         # Ingest Network Activity
         raw_net = sandbox_result.get("network_activity", [])
         if isinstance(raw_net, dict):
+            if raw_net.get("is_truncated"):
+                logger.warning("[%s] Ingesting truncated network telemetry (first 100 requests of %s total)", scan_id, raw_net.get("total_request_count"))
             net_list = raw_net.get("rows", [])
         elif isinstance(raw_net, list):
             net_list = raw_net

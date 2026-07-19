@@ -172,8 +172,11 @@ def check_pwned_password(plain_password: str) -> bool:
                         return True
         return False
     except Exception as e:
-        logger.warning("HIBP k-anonymity check failed or timed out (%s) — failing open to prevent registration outage", e)
         record_hibp_failure_metric()
+        if getattr(settings, "HIBP_FAIL_CLOSED", False):
+            logger.error("HIBP k-anonymity check failed or timed out (%s) — failing closed (HIBP_FAIL_CLOSED=True)", e)
+            raise ValueError("Password breach check service is temporarily unavailable. Please try again later.")
+        logger.warning("HIBP k-anonymity check failed or timed out (%s) — failing open to prevent registration outage", e)
         return False
 
 
