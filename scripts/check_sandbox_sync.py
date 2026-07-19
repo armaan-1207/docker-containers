@@ -100,7 +100,19 @@ def main():
         print(f"[check-sandbox-sync] ERROR: Unauthorized service(s) attached to docker_proxy_net! Found: {sorted(proxy_net_services)}, Allowed exactly: {sorted(allowed_proxy_services)}", file=sys.stderr)
         sys.exit(1)
 
-    print("[check-sandbox-sync] SUCCESS: sandbox_runner_svc.py and docker-compose.yml definitions (including docker_proxy_net isolation) are fully synchronized.")
+    # Check that reference_hashes.json in backend/ai_engine and sandbox/backend are identical
+    ref_ai = os.path.join(root_dir, "backend", "ai_engine", "reference_hashes.json")
+    ref_sb = os.path.join(root_dir, "sandbox", "backend", "reference_hashes.json")
+    if os.path.exists(ref_ai) and os.path.exists(ref_sb):
+        with open(ref_ai, "rb") as f1, open(ref_sb, "rb") as f2:
+            if f1.read() != f2.read():
+                print("[check-sandbox-sync] ERROR: backend/ai_engine/reference_hashes.json and sandbox/backend/reference_hashes.json are not byte-identical!", file=sys.stderr)
+                sys.exit(1)
+    else:
+        print("[check-sandbox-sync] ERROR: Could not find reference_hashes.json files for sync verification.", file=sys.stderr)
+        sys.exit(1)
+
+    print("[check-sandbox-sync] SUCCESS: sandbox_runner_svc.py and docker-compose.yml definitions (including docker_proxy_net isolation and reference_hashes sync) are fully synchronized.")
 
 if __name__ == "__main__":
     main()

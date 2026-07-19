@@ -94,6 +94,13 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /etc/nginx/certs:rw,noexec,nosuid,size=16m
+      - /var/log/nginx:rw,noexec,nosuid,size=32m
     security_opt:
       - no-new-privileges:true
     cap_drop:

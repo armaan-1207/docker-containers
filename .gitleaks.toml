@@ -22,6 +22,7 @@ paths = [
   # these are 16-char hex pHash strings (image fingerprints), not secrets.
   # High entropy hex triggers generic "possible secret" detectors.
   '''sandbox/backend/reference_hashes\.json$''',
+  '''backend/ai_engine/reference_hashes\.json$''',
 ]
 
 regexes = [

@@ -1,10 +1,12 @@
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, func, JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from database.database import Base
+
+JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
 
 
 def _uuid() -> str:
@@ -65,7 +67,7 @@ class Incident(Base):
 
     severity = Column(String(16), nullable=False)
     risk_score = Column(Float, nullable=True)
-    summary = Column(JSONB, nullable=True)
+    summary = Column(JSON_TYPE, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -118,7 +120,7 @@ class NetworkActivity(Base):
     domain = Column(String(255), nullable=True, index=True)
     ip_address = Column(String(64), nullable=True, index=True)
     status = Column(Integer, nullable=True)
-    headers = Column(JSONB, nullable=True)
+    headers = Column(JSON_TYPE, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     scan = relationship("Scan", back_populates="network_activity")
 
@@ -133,7 +135,7 @@ class TLSConnection(Base):
     valid_from = Column(DateTime, nullable=True)
     valid_to = Column(DateTime, nullable=True)
     is_suspicious = Column(Boolean, nullable=False, default=False)
-    cert_chain = Column(JSONB, nullable=True)
+    cert_chain = Column(JSON_TYPE, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     scan = relationship("Scan", back_populates="tls_connections")
 
@@ -142,7 +144,7 @@ class FormMetrics(Base):
     id = Column(String(36), primary_key=True, default=_uuid)
     scan_id = Column(String(36), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
     action_url = Column(String(2048), nullable=True)
-    input_types = Column(JSONB, nullable=True)
+    input_types = Column(JSON_TYPE, nullable=True)
     has_password_field = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     scan = relationship("Scan", back_populates="form_metrics")

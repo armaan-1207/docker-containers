@@ -27,6 +27,7 @@ _ALLOWED_ARTIFACTS = {
     "browser.html",
     "browser.png",
     "sandbox.png",
+    "sandbox_fullpage.png",
     "risk_report.json",
     "browser_features.json",
     "consistency_report.json",

@@ -239,6 +239,10 @@ class Settings(BaseSettings):
     # volume before the hourly file_cleanup task purges them (finding #8).
     ARTIFACT_RETENTION_DAYS: int = 14
 
+    # How many days to retain security incident records and child IOCs
+    # in the database before archival or deletion.
+    INCIDENT_RETENTION_DAYS: int = 365
+
     SANDBOX_NETWORK: Optional[str] = "aegis_sandbox_net"
     SANDBOX_IMAGE: str = "aegis-sandbox@sha256:454a806c1149eb37e1c09003c2aa2a86ec5d9c5d5c9650a23308117eb2d00f9c"
     SANDBOX_RUNNER_SECRET: str = ""
@@ -296,7 +300,7 @@ if settings.is_production and not settings.REQUIRE_REAL_CERT:
     )
 
 if settings.is_production:
-    for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "SANDBOX_RUNNER_SECRET"):
+    for secret_name in ("SECRET_KEY", "AEGIS_DB_PASSWORD", "REDIS_PASSWORD", "REDIS_SECURITY_PASSWORD", "SANDBOX_RUNNER_SECRET"):
         val = getattr(settings, secret_name, "")
         if not val or val.startswith("CHANGE_THIS_") or val == "change-this-in-production" or len(val) < 32:
             raise RuntimeError(

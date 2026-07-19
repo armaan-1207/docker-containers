@@ -57,13 +57,13 @@ def main():
     if shutil.which("pip-audit"):
         success &= check_and_run(
             "pip-audit",
-            ["-r", "backend/requirements.txt", "-r", "sandbox/docker/requirements.txt"],
+            ["-r", "backend/requirements.txt", "-r", "backend/requirements.runner.txt", "-r", "sandbox/docker/requirements.txt"],
             "Auditing Python dependencies for known CVEs"
         )
     elif shutil.which("safety"):
         success &= check_and_run(
             "safety",
-            ["check", "-r", "backend/requirements.txt", "-r", "sandbox/docker/requirements.txt"],
+            ["check", "-r", "backend/requirements.txt", "-r", "backend/requirements.runner.txt", "-r", "sandbox/docker/requirements.txt"],
             "Auditing Python dependencies with Safety"
         )
     else:

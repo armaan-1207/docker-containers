@@ -162,12 +162,10 @@ def _find_result_by_request_id(scan_id: str) -> Tuple[str, dict]:
     raise FileNotFoundError(f"No sandbox result found for scan {scan_id} in {settings.SHARED_DIR}")
 
 
-def _cleanup_sandbox_root_files(json_path: str, sandbox_result: dict) -> None:
+def _cleanup_sandbox_root_files(json_path: str, sandbox_result: dict, scan_dir: str = None) -> None:
     """
-    The sandbox container writes its own JSON and BOTH screenshots flat
-    into the shared volume ROOT or per-scan subdirectory -- only the homepage
-    screenshot gets renamed/moved to sandbox.png by the caller below.
-    Delete leftover raw JSON and full-page screenshots after processing.
+    Delete leftover raw JSON and temporary screenshots after processing, while preserving
+    final scan artifacts inside scan_dir.
     """
     candidates = [json_path]
     full_page_path = sandbox_result.get("screenshots", {}).get("fullpage_screenshot_path")
@@ -186,6 +184,8 @@ def _cleanup_sandbox_root_files(json_path: str, sandbox_result: dict) -> None:
     for path in candidates:
         try:
             if path and os.path.exists(path):
+                if scan_dir and os.path.abspath(os.path.dirname(path)) == os.path.abspath(scan_dir):
+                    continue
                 os.remove(path)
         except OSError:
             logger.warning("Could not remove leftover sandbox file %s", path, exc_info=True)
@@ -291,7 +291,10 @@ def sandbox_analysis_task(self, scan_id: str):
         logger.exception("[%s] Failed to ingest sandbox telemetry to Postgres", scan_id)
 
     screenshots = sandbox_result.get("screenshots", {})
-    for key, dst_name in (("homepage_screenshot_path", "sandbox.png"),):
+    for key, dst_name in (
+        ("homepage_screenshot_path", "sandbox.png"),
+        ("fullpage_screenshot_path", "sandbox_fullpage.png"),
+    ):
         src = screenshots.get(key)
         if src and not os.path.exists(src):
             for cand in (
@@ -307,7 +310,7 @@ def sandbox_analysis_task(self, scan_id: str):
                 os.replace(src, dst)
 
     if source_json_path:
-        _cleanup_sandbox_root_files(source_json_path, sandbox_result)
+        _cleanup_sandbox_root_files(source_json_path, sandbox_result, scan_dir=scan_dir)
 
     logger.info("[%s] sandbox artifacts written", scan_id)
     _mark_status(scan_id, "sandbox_analysis_done")

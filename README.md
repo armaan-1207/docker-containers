@@ -226,7 +226,8 @@ shared_scans/
     ├── browser.png              ← Stage 1: Initial browser viewport screenshot
     ├── browser.html             ← Stage 1: Initial raw page HTML
     ├── browser_features.json    ← Stage 1: OCR text, vision hashes, and DOM feature metrics
-    ├── sandbox.png              ← Stage 2: Sandbox full-page screenshot after challenges
+    ├── sandbox.png              ← Stage 2: Sandbox viewport screenshot after challenges
+    ├── sandbox_fullpage.png     ← Stage 2: Sandbox full-page screenshot after challenges
     ├── sandbox.html             ← Stage 2: Sandbox rendered DOM HTML
     ├── sandbox_metadata.json    ← Stage 2: Network HAR requests, redirect chains, & TLS details
     ├── consistency_report.json  ← Stage 3: Cloaking and behavioral diff evaluation metrics

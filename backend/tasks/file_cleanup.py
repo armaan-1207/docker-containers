@@ -1,36 +1,39 @@
 """
 tasks/file_cleanup.py
 ======================
-Periodic artifact retention task (security finding #8 fix).
+Periodic retention and cleanup task (security finding #8 fix).
 
 Responsibility:
   Prevent disk exhaustion on the shared_scans volume, which would corrupt
   databases and cause a platform-wide outage. This task is scheduled hourly
-  by celery_beat.py.
+  by celery_beat.py. Also enforces dual-tier database retention so high-value
+  incident history is preserved long-term while scratch records and files are pruned.
 
 What it cleans:
   1. Per-scan subdirectories under SHARED_DIR/<scan_id>/ that are older
      than `retention_days` days (default 14). Each subdirectory contains
-     browser.png, browser.html, sandbox.png, sandbox.html,
+     browser.png, browser.html, sandbox.png, sandbox_fullpage.png,
      browser_features.json, sandbox_metadata.json, consistency_report.json,
-     risk_report.json, cyberintel.json — all are safe to purge after the
-     scan pipeline has completed and the results are in the database.
+     risk_report.json, cyberintel.json — safe to purge after scan pipeline completion.
 
   2. Orphan files at the SHARED_DIR root that match scan_*.json or
      scan_*.png — left behind by the sandbox container on crashed /
-     incomplete scan jobs. The normal cleanup path in sandbox_analysis.py
-     removes these, but crashes can bypass that path.
+     incomplete scan jobs.
 
-What it does NOT touch:
-  - Any file / directory whose mtime is within the retention window.
-  - Non-scan files at the volume root (nothing else is written there).
-  - The database — this is a filesystem-only purge.
+  3. Quarantined samples inside SHARED_DIR/quarantine older than `retention_days`.
+
+  4. Database Purge (Dual-Tier Retention):
+     - Scans without any associated security Incidents (`~Scan.incidents.any()`)
+       are pruned after `retention_days` (default 14 days).
+     - Scans associated with actual security Incidents (and their child Incident/IOC
+       records) are kept much longer, determined by `incident_retention_days`
+       (default 365 days, or configured via settings.INCIDENT_RETENTION_DAYS).
+     - Whenever rows are purged, `Statistics` counters (total_incidents, critical_count,
+       high_count) are re-synchronized via COUNT() queries to prevent drift.
 
 Failure modes:
-  - Individual file/directory removal errors are logged as warnings and
-    skipped — a single unremovable file does not abort the entire sweep.
-  - The task itself is safe to run multiple times concurrently (idempotent);
-    missing files are silently ignored.
+  - Individual file/directory removal errors are logged as warnings and skipped.
+  - The task itself is safe to run multiple times concurrently (idempotent).
 """
 
 import glob
@@ -43,14 +46,12 @@ from celery_worker import celery
 from config import settings
 from tasks import _UUID_RE
 from database.database import SessionLocal
-from database.models import Scan
+from database.models import Scan, Incident, Statistics
 from datetime import datetime, timedelta, timezone
+from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
-# How old (in seconds) a scan directory must be before it is pruned.
-# Computed from retention_days at task call time so it can be changed
-# via the beat_schedule kwargs without redeploying code.
 _SECONDS_PER_DAY = 86_400
 
 
@@ -61,20 +62,25 @@ _SECONDS_PER_DAY = 86_400
     max_retries=1,
     acks_late=True,
 )
-def file_cleanup_task(self, retention_days: int = 14) -> dict:
+def file_cleanup_task(self, retention_days: int = 14, incident_retention_days: int = None) -> dict:
     """
     Purge scan artifacts older than `retention_days` days from the shared
-    scans volume. Also removes orphan files at the volume root.
+    scans volume. Also purges old database Scan/Incident records according to
+    dual-tier retention and re-synchronizes Statistics counters.
     """
+    if incident_retention_days is None:
+        incident_retention_days = getattr(settings, "INCIDENT_RETENTION_DAYS", 365)
+
     shared_dir = settings.SHARED_DIR
     cutoff_seconds = retention_days * _SECONDS_PER_DAY
     now = time.time()
     cutoff_ts = now - cutoff_seconds
 
     logger.info(
-        "[file_cleanup] Starting sweep of %s — retention=%d days, cutoff=%s",
+        "[file_cleanup] Starting sweep of %s — retention=%d days, incident_retention=%d days, cutoff=%s",
         shared_dir,
         retention_days,
+        incident_retention_days,
         time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff_ts)),
     )
 
@@ -120,9 +126,6 @@ def file_cleanup_task(self, retention_days: int = 14) -> dict:
                 errors += 1
 
     # ── 2. Orphan files at the volume root ────────────────────────────────
-    # Sandbox containers write scan_<id>.json and scan_<id>.png flat into
-    # the shared volume root. sandbox_analysis.py normally deletes these
-    # after ingestion, but crashes bypass that path.
     for pattern in ("scan_*.json", "scan_*.png"):
         for path in glob.glob(os.path.join(shared_dir, pattern)):
             try:
@@ -157,24 +160,52 @@ def file_cleanup_task(self, retention_days: int = 14) -> dict:
         except OSError:
             pass
 
-    # ── 4. Database Purge ──────
+    # ── 4. Database Purge (Dual-Tier Retention) ──────
     db_records_removed = 0
-    cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff_datetime_artifacts = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff_datetime_incidents = datetime.now(timezone.utc) - timedelta(days=incident_retention_days)
     try:
         with SessionLocal() as db:
-            # Rely on DB-level ON DELETE CASCADE (configured via migration) to prune child Incident and IOC rows
-            deleted_count = db.query(Scan).filter(Scan.created_at <= cutoff_datetime).delete(synchronize_session=False)
+            # 1. Purge scans WITHOUT incidents older than ARTIFACT_RETENTION_DAYS
+            del_scans = db.query(Scan).filter(
+                Scan.created_at <= cutoff_datetime_artifacts,
+                ~Scan.incidents.any()
+            ).delete(synchronize_session=False)
+
+            # 2. Purge old scans/incidents older than INCIDENT_RETENTION_DAYS
+            del_incidents_scans = db.query(Scan).filter(
+                Scan.created_at <= cutoff_datetime_incidents
+            ).delete(synchronize_session=False)
+
+            db_records_removed = del_scans + del_incidents_scans
+
+            # 3. Re-synchronize Statistics table via accurate COUNT() queries to prevent drift
+            total_inc = db.query(func.count(Incident.id)).scalar() or 0
+            crit_inc = db.query(func.count(Incident.id)).filter(Incident.severity == "CRITICAL").scalar() or 0
+            high_inc = db.query(func.count(Incident.id)).filter(Incident.severity == "HIGH").scalar() or 0
+
+            stats = db.query(Statistics).filter(Statistics.id == 1).first()
+            if not stats:
+                stats = Statistics(id=1, total_incidents=total_inc, critical_count=crit_inc, high_count=high_inc)
+                db.add(stats)
+            else:
+                stats.total_incidents = total_inc
+                stats.critical_count = crit_inc
+                stats.high_count = high_inc
+                stats.updated_at = func.now()
+
             db.commit()
-            db_records_removed = deleted_count
-            logger.info("[file_cleanup] Purged %d old scans from database.", db_records_removed)
+            logger.info("[file_cleanup] Purged %d old scans (non-inc=%d, old-inc=%d). Statistics synced: total=%d, crit=%d, high=%d.",
+                        db_records_removed, del_scans, del_incidents_scans, total_inc, crit_inc, high_inc)
     except Exception as e:
-        logger.error("[file_cleanup] Failed to purge old scans from database: %s", e)
+        logger.error("[file_cleanup] Failed to purge old scans or sync statistics from database: %s", e)
         errors += 1
 
     summary = {
         "status": "ok",
         "shared_dir": shared_dir,
         "retention_days": retention_days,
+        "incident_retention_days": incident_retention_days,
         "dirs_removed": dirs_removed,
         "dirs_skipped": dirs_skipped,
         "orphans_removed": orphans_removed,
