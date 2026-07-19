@@ -174,9 +174,20 @@ class WebSocketManager:
         except Exception:
             logger.exception("[%s] failed to publish risk update to redis", scan_id)
 
+    async def _scan_keys(self, pattern: str) -> list[str]:
+        keys = []
+        cursor = "0"
+        while cursor != 0:
+            cursor, partial = await self._redis.scan(cursor=cursor, match=pattern, count=500)
+            if isinstance(cursor, bytes):
+                cursor = cursor.decode()
+            cursor = int(cursor)
+            keys.extend(partial)
+        return keys
+
     async def reconcile_counters(self) -> None:
         """
-        Reconcile Redis ws_cnt:{user_id} counters across multi-process workers.
+        Reconcile Redis ws_cnt:{user_id} counters across multi-process workers using SCAN.
 
         In multi-process Uvicorn deployments (--workers > 1), each worker tracks
         its active connections under a worker-scoped Redis key:
@@ -184,7 +195,7 @@ class WebSocketManager:
 
         During reconciliation:
         1. Each worker refreshes its worker-scoped counts with a 600s TTL.
-        2. We aggregate across all alive worker keys for each user and set the
+        2. We scan across all alive worker keys using SCAN (non-blocking) and set the
            global authoritative ws_cnt:{user_id} sum.
         """
         for user_id, sockets in list(self.user_connections.items()):
@@ -192,7 +203,7 @@ class WebSocketManager:
             await self._update_worker_count(user_id, actual)
 
         try:
-            keys = await self._redis.keys("ws_worker:*:*")
+            keys = await self._scan_keys("ws_worker:*:*")
             user_ids = set()
             for k in keys:
                 parts = k.split(":")
@@ -201,7 +212,10 @@ class WebSocketManager:
             user_ids.update(self.user_connections.keys())
 
             for user_id in user_ids:
-                worker_keys = await self._redis.keys(f"ws_worker:{user_id}:*")
+                worker_keys = [k for k in keys if k.startswith(f"ws_worker:{user_id}:")]
+                if not worker_keys:
+                    # Check if there are keys that were added or missed in scan just in case
+                    worker_keys = await self._scan_keys(f"ws_worker:{user_id}:*")
                 if worker_keys:
                     counts = await asyncio.gather(*(self._redis.get(wk) for wk in worker_keys), return_exceptions=True)
                     total = sum(int(c) for c in counts if isinstance(c, (int, str)) and str(c).isdigit())

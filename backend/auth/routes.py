@@ -66,7 +66,8 @@ def register(
             detail="Password has appeared in public data breaches (k-anonymity HIBP check). Please choose a unique, unbreached password.",
         )
 
-    existing = db.query(User).filter(User.email == payload.email).first()
+    email = (payload.email or "").lower().strip()
+    existing = db.query(User).filter(User.email == email).first()
 
     # Always pay the bcrypt cost -- whether or not this email is already
     # registered -- so response timing cannot be used to distinguish the
@@ -82,12 +83,12 @@ def register(
         return UserRegisterAcceptedResponse()
 
     user = User(
-        email=payload.email,
+        email=email,
         hashed_password=hashed_password,
     )
     db.add(user)
     db.commit()
-    logger.info("New user registered: %s", payload.email)
+    logger.info("New user registered: %s", email)
     return UserRegisterAcceptedResponse()
 
 
@@ -120,7 +121,7 @@ def login(
             detail="Authentication service temporarily unavailable",
         )
 
-    user = db.query(User).filter(User.email == form_data.username).first()
+    user = db.query(User).filter(User.email == email).first()
 
     # Always run the password hash comparison — even when user is None —
     # so the response time is identical regardless of whether the account

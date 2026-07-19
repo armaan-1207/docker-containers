@@ -321,66 +321,168 @@ def sandbox_analysis_task(self, scan_id: str):
 
 
 def _save_telemetry_to_postgres(scan_id: str, sandbox_result: dict) -> None:
+    from urllib.parse import urlparse
+
+    def _domain_of(u: str) -> str:
+        if not u:
+            return ""
+        try:
+            return urlparse(u).hostname or ""
+        except Exception:
+            return ""
+
     with get_db_session() as db:
+        source_url = sandbox_result.get("scans", {}).get("source_url") or ""
+        final_url = sandbox_result.get("pages", {}).get("final_url") or source_url
+
         # Ingest Network Activity
-        for req in sandbox_result.get("network_activity", []):
+        raw_net = sandbox_result.get("network_activity", [])
+        if isinstance(raw_net, dict):
+            net_list = raw_net.get("rows", [])
+        elif isinstance(raw_net, list):
+            net_list = raw_net
+        else:
+            net_list = []
+
+        for req in net_list:
+            if not isinstance(req, dict):
+                continue
+            url = req.get("url") or final_url
+            if not url:
+                continue
+            domain = req.get("domain") or _domain_of(url)
             db.add(NetworkActivity(
                 scan_id=scan_id,
-                method=req.get("method"),
-                url=req.get("url"),
-                domain=req.get("domain"),
-                ip_address=req.get("ip_address"),
+                method=(req.get("method") or "GET")[:16],
+                url=url[:2048],
+                domain=domain[:255] if domain else None,
+                ip_address=req.get("ip_address", "")[:64] if req.get("ip_address") else None,
                 status=req.get("status"),
                 headers=req.get("headers")
             ))
             
         # Ingest TLS Connections
-        for tls in sandbox_result.get("tls_connections", []):
+        raw_tls = sandbox_result.get("tls_connections", [])
+        if isinstance(raw_tls, dict):
+            tls_list = raw_tls.get("rows", [])
+            if not tls_list and (raw_tls.get("domain") or raw_tls.get("protocol_used") or raw_tls.get("certificate_issuer")):
+                domain = raw_tls.get("domain") or _domain_of(final_url)
+                if domain:
+                    tls_list = [{
+                        "domain": domain,
+                        "protocol": raw_tls.get("protocol") or raw_tls.get("protocol_used") or raw_tls.get("tls_version"),
+                        "cipher": raw_tls.get("cipher"),
+                        "issuer": raw_tls.get("issuer") or raw_tls.get("certificate_issuer"),
+                        "valid_from": raw_tls.get("valid_from") or raw_tls.get("certificate_issued_date"),
+                        "valid_to": raw_tls.get("valid_to"),
+                        "is_suspicious": raw_tls.get("is_suspicious", False),
+                        "cert_chain": raw_tls.get("cert_chain")
+                    }]
+        elif isinstance(raw_tls, list):
+            tls_list = raw_tls
+        else:
+            tls_list = []
+
+        for tls in tls_list:
+            if not isinstance(tls, dict):
+                continue
+            domain = tls.get("domain") or _domain_of(final_url)
+            if not domain:
+                continue
             db.add(TLSConnection(
                 scan_id=scan_id,
-                domain=tls.get("domain"),
-                protocol=tls.get("protocol"),
-                cipher=tls.get("cipher"),
-                issuer=tls.get("issuer"),
-                is_suspicious=tls.get("is_suspicious", False),
+                domain=domain[:255],
+                protocol=(tls.get("protocol") or tls.get("protocol_used") or tls.get("tls_version", ""))[:64] if (tls.get("protocol") or tls.get("protocol_used") or tls.get("tls_version")) else None,
+                cipher=tls.get("cipher", "")[:128] if tls.get("cipher") else None,
+                issuer=(tls.get("issuer") or tls.get("certificate_issuer", ""))[:512] if (tls.get("issuer") or tls.get("certificate_issuer")) else None,
+                is_suspicious=bool(tls.get("is_suspicious", False)),
                 cert_chain=tls.get("cert_chain")
             ))
             
         # Ingest Form Metrics
         form_metrics = sandbox_result.get("form_metrics", {})
-        if form_metrics:
+        if isinstance(form_metrics, dict) and form_metrics:
+            has_pw = form_metrics.get("has_password_field")
+            if has_pw is None:
+                has_pw = bool((form_metrics.get("password_field_count") or 0) > 0)
             db.add(FormMetrics(
                 scan_id=scan_id,
-                action_url=form_metrics.get("action_url"),
-                input_types=form_metrics.get("input_types"),
-                has_password_field=form_metrics.get("has_password_field", False)
+                action_url=(form_metrics.get("action_url") or final_url)[:2048] if (form_metrics.get("action_url") or final_url) else None,
+                input_types=form_metrics.get("input_types", form_metrics.get("non_credential_field_count", [])),
+                has_password_field=bool(has_pw)
             ))
             
         # Ingest Downloads
-        for dl in sandbox_result.get("downloads", []):
+        raw_dl = sandbox_result.get("downloads", [])
+        if isinstance(raw_dl, dict):
+            dl_list = raw_dl.get("rows", [])
+        elif isinstance(raw_dl, list):
+            dl_list = raw_dl
+        else:
+            dl_list = []
+
+        for dl in dl_list:
+            if not isinstance(dl, dict):
+                continue
+            dl_url = dl.get("url") or dl.get("download_url") or final_url
+            if not dl_url:
+                continue
+            filename = dl.get("filename") or dl.get("file_name")
+            size = dl.get("size_bytes") if dl.get("size_bytes") is not None else dl.get("file_size")
             db.add(Download(
                 scan_id=scan_id,
-                url=dl.get("url"),
-                mime_type=dl.get("mime_type"),
-                filename=dl.get("filename"),
-                size_bytes=dl.get("size_bytes")
+                url=dl_url[:2048],
+                mime_type=dl.get("mime_type", "")[:128] if dl.get("mime_type") else None,
+                filename=filename[:255] if filename else None,
+                size_bytes=size
             ))
             
         # Ingest Redirects
-        for rdr in sandbox_result.get("redirects", []):
+        raw_rdr = sandbox_result.get("redirects", [])
+        if isinstance(raw_rdr, dict):
+            rdr_list = raw_rdr.get("rows", [])
+        elif isinstance(raw_rdr, list):
+            rdr_list = raw_rdr
+        else:
+            rdr_list = []
+
+        for rdr in rdr_list:
+            if not isinstance(rdr, dict):
+                continue
+            to_u = rdr.get("to_url") or rdr.get("redirect_url")
+            from_u = rdr.get("from_url") or source_url
+            if not to_u or not from_u:
+                continue
+            status = rdr.get("status_code") if rdr.get("status_code") is not None else rdr.get("http_status_code")
             db.add(Redirect(
                 scan_id=scan_id,
-                from_url=rdr.get("from_url"),
-                to_url=rdr.get("to_url"),
-                status_code=rdr.get("status_code")
+                from_url=from_u[:2048],
+                to_url=to_u[:2048],
+                status_code=status
             ))
             
         # Ingest Evasion Techniques
-        for ev in sandbox_result.get("evasion_techniques", []):
+        raw_ev = sandbox_result.get("evasion_techniques", [])
+        if isinstance(raw_ev, dict):
+            ev_list = raw_ev.get("rows", [])
+        elif isinstance(raw_ev, list):
+            ev_list = raw_ev
+        else:
+            ev_list = []
+
+        for ev in ev_list:
+            if not isinstance(ev, dict):
+                continue
+            if ev.get("evasion_technique_flags") is False:
+                continue
+            t_name = ev.get("technique_name")
+            if not t_name:
+                continue
+            snippet = ev.get("evidence_snippet") or f"Detected technique: {t_name}"
             db.add(EvasionTechnique(
                 scan_id=scan_id,
-                technique_name=ev.get("technique_name"),
-                evidence_snippet=ev.get("evidence_snippet")
+                technique_name=t_name[:128],
+                evidence_snippet=snippet[:2048]
             ))
             
         db.commit()

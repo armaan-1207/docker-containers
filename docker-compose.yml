@@ -257,7 +257,7 @@ services:
       CONFIGS: 0
       DISTRIBUTION: 0
       EXEC: 0
-      IMAGES: 0
+      IMAGES: 1
       INFO: 0
       NETWORKS: 0
       NODES: 0
@@ -317,6 +317,9 @@ services:
     cap_drop:
       - ALL
     read_only: true
+    tmpfs:
+      - /tmp
+      - /root/.docker
     restart: unless-stopped
     depends_on:
       docker_socket_proxy:

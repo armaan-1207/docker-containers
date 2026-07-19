@@ -931,7 +931,7 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
 
                 def on_request(req):
                     network_events.append({"type": "request", "url": req.url,
-                                            "resource_type": req.resource_type})
+                                            "resource_type": req.resource_type, "method": req.method})
 
                 async def on_response(resp):
                     try:
@@ -1176,6 +1176,20 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
 
                 popup_count, new_tab_count = classify_window_opens(window_open_events)
 
+                resp_map = {e["url"]: e for e in responses}
+                network_rows = []
+                for req in requests[:100]:
+                    resp_data = resp_map.get(req["url"], {})
+                    network_rows.append({
+                        "network_id": str(uuid.uuid4()),
+                        "scan_id": scan_id,
+                        "method": req.get("method", "GET"),
+                        "url": req["url"],
+                        "domain": domain_of(req["url"]),
+                        "status": resp_data.get("status"),
+                        "headers": resp_data.get("headers", {}),
+                    })
+
                 downloads_rows = []
                 for d in downloads:
                     size = None
@@ -1216,8 +1230,7 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
                         "scan_id": scan_id,
                         "file_name": safe_name,
                         "file_size": size,
-                        # Ops/debug field, not part of the DOWNLOADS table schema —
-                        # drop this key before inserting if your DB column set is strict.
+                        "url": getattr(d, "url", None) or final_url or url,
                         "quarantined_path": quarantined_path,
                     })
                 if downloads_rows:
@@ -1225,33 +1238,48 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
 
                 # Matches the real sandbox_db schema exactly: the redirects
                 # table has redirect_chain TEXT[] + redirect_url + http_status_code
-                # -- there is no hop_index column. Each row does duplicate the
-                # full chain (that's the schema as designed, not a leftover
-                # bug); position within `chain` is preserved by iteration
-                # order rather than an explicit index column.
+                # -- plus from_url and to_url for direct relational mapping.
                 redirects_rows = []
-                for hop_url in chain:
-                    status = next((r["status"] for r in responses if r["url"] == hop_url), None)
-                    redirects_rows.append({
-                        "redirect_id": str(uuid.uuid4()),
-                        "scan_id": scan_id,
-                        "redirect_chain": chain,
-                        "redirect_url": hop_url,
-                        "http_status_code": status,
-                    })
+                if len(chain) > 1:
+                    for i in range(len(chain) - 1):
+                        from_u = chain[i]
+                        to_u = chain[i+1]
+                        status = next((r["status"] for r in responses if r["url"] == from_u), None)
+                        redirects_rows.append({
+                            "redirect_id": str(uuid.uuid4()),
+                            "scan_id": scan_id,
+                            "redirect_chain": chain,
+                            "from_url": from_u,
+                            "to_url": to_u,
+                            "redirect_url": to_u,
+                            "http_status_code": status,
+                            "status_code": status,
+                        })
+                elif chain:
+                    for hop_url in chain:
+                        status = next((r["status"] for r in responses if r["url"] == hop_url), None)
+                        redirects_rows.append({
+                            "redirect_id": str(uuid.uuid4()),
+                            "scan_id": scan_id,
+                            "redirect_chain": chain,
+                            "from_url": url,
+                            "to_url": hop_url,
+                            "redirect_url": hop_url,
+                            "http_status_code": status,
+                            "status_code": status,
+                        })
 
-                evasion_rows = [
-                    {
-                        "technique_id": str(uuid.uuid4()),
-                        "scan_id": scan_id,
-                        "technique_name": name,
-                        # BOOLEAN column in evasion_techniques -- True/False,
-                        # not 1/0 (an int into a BOOLEAN column is a type
-                        # mismatch for most DB drivers).
-                        "evasion_technique_flags": bool(re.search(pat, inline_script_text)),
-                    }
-                    for name, pat in EVASION_PATTERNS.items()
-                ]
+                evasion_rows = []
+                for name, pat in EVASION_PATTERNS.items():
+                    m = re.search(pat, inline_script_text)
+                    if m:
+                        evasion_rows.append({
+                            "technique_id": str(uuid.uuid4()),
+                            "scan_id": scan_id,
+                            "technique_name": name,
+                            "evasion_technique_flags": True,
+                            "evidence_snippet": m.group(0)[:200],
+                        })
 
                 headers_rows = [
                     {
@@ -1322,6 +1350,7 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
             "xhr_request_count": xhr_request_count,
             "websocket_connection_count": websocket_connection_count,
             "fingerprinting_api_count": counters.get("fingerprinting_api_count", 0),
+            "rows": network_rows,
         },
         "browser_events": {
             "event_id": str(uuid.uuid4()),
@@ -1341,6 +1370,18 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
             "certificate_issuer": certificate_issuer,
             "tls_version": tls_version,
             "certificate_issued_date": certificate_issued_date,
+            "rows": [{
+                "tls_id": str(uuid.uuid4()),
+                "scan_id": scan_id,
+                "domain": domain_of(final_url or url),
+                "protocol": protocol_used or tls_version,
+                "cipher": None,
+                "issuer": certificate_issuer,
+                "valid_from": certificate_issued_date,
+                "valid_to": None,
+                "is_suspicious": not certificate_present if urlparse(final_url or url).scheme == "https" else False,
+                "cert_chain": None,
+            }] if domain_of(final_url or url) else [],
         },
         "form_metrics": {
             "form_stats_id": str(uuid.uuid4()),
@@ -1350,6 +1391,9 @@ async def scan_url(url, timeout_ms=45000, viewport=(1366, 768), request_id=None,
             "non_credential_field_count": dom.get("non_credential_field_count", []),
             "submit_button_count": dom.get("submit_button_count"),
             "cross_domain_form_count": dom.get("cross_domain_form_count"),
+            "has_password_field": bool((dom.get("password_field_count") or 0) > 0),
+            "action_url": final_url or url,
+            "input_types": dom.get("non_credential_field_count", []),
         },
         "dom_content": {
             "dom_stats_id": str(uuid.uuid4()),

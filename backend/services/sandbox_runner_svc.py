@@ -81,6 +81,22 @@ async def verify_host_firewall_and_image():
             "Run 'make pin-sandbox' or 'python scripts/pin_sandbox.py' before starting."
         )
 
+    # Verify SANDBOX_IMAGE exists locally (now possible with IMAGES: 1 on docker_socket_proxy)
+    try:
+        inspect_proc = await asyncio.create_subprocess_exec(
+            "docker", "inspect", "--type=image", SANDBOX_IMAGE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        _, inspect_err = await inspect_proc.communicate()
+        if inspect_proc.returncode != 0:
+            err_msg = inspect_err.decode().strip() or "Image not found"
+            logger.warning("[startup] SANDBOX_IMAGE '%s' not found locally via Docker API (%s). Ensure it is built ('make pin-sandbox') before running scans.", SANDBOX_IMAGE, err_msg)
+        else:
+            logger.info("[startup] Verified SANDBOX_IMAGE '%s' exists locally.", SANDBOX_IMAGE)
+    except Exception as e:
+        logger.debug("[startup] Could not verify SANDBOX_IMAGE presence via docker inspect: %s", e)
+
     try:
         cmd = [
             "docker", "run", "--rm",
@@ -95,7 +111,9 @@ async def verify_host_firewall_and_image():
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        await proc.communicate()
+        _, stderr_data = await proc.communicate()
+        stderr_text = stderr_data.decode(errors="replace").strip()
+
         if proc.returncode == 0:
             msg = (
                 f"[CRITICAL SECURITY WARNING] Host firewall rules (scripts/setup_host_firewall.sh) "
@@ -105,8 +123,14 @@ async def verify_host_firewall_and_image():
             logger.error(msg)
             if is_prod:
                 raise RuntimeError(msg)
+        elif proc.returncode == 1:
+            # returncode 1 from sh/nc means nc ran inside container but could not connect (timed out or refused by firewall)
+            logger.info("[startup] Host firewall / network isolation verified for %s (probe rejected with exit code 1)", SANDBOX_NETWORK)
+        elif proc.returncode >= 125:
+            # 125=docker run failed, 126=cannot invoke, 127=command not found inside container (e.g. image not pulled or proxy denied)
+            logger.warning("[startup] Active firewall probe skipped: docker container execution failed (return code %s): %s", proc.returncode, stderr_text)
         else:
-            logger.info("[startup] Host firewall / network isolation verified for %s (probe rejected)", SANDBOX_NETWORK)
+            logger.info("[startup] Host firewall / network isolation probe finished with code %s (%s)", proc.returncode, stderr_text)
     except Exception as e:
         if isinstance(e, RuntimeError):
             raise
