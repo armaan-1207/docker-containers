@@ -24,6 +24,7 @@ import logging
 import os
 import re
 
+from fastapi import HTTPException, status
 from PIL import Image, UnidentifiedImageError
 
 # High #4 fix: Cap total image pixels to prevent decompression bombs across Pillow decodes
@@ -161,7 +162,6 @@ def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Response:
                 except OSError:
                     pass
         if "scanner unavailable" in png_details.lower() or "scanner unavailable" in html_details.lower() or "initializing" in png_details.lower() or "initializing" in html_details.lower():
-            from fastapi import HTTPException, status
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Anti-malware scanner (ClamAV) is currently initializing or unavailable. Please retry shortly.",
