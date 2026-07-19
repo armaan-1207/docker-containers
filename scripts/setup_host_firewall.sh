@@ -31,9 +31,8 @@ if [[ $# -eq 0 ]]; then
     exit 1
 fi
 
-# Ensure DOCKER-USER chain exists (created by Docker Daemon)
 iptables -N DOCKER-USER 2>/dev/null || true
-iptables -I DOCKER-USER -i docker0 -o docker0 -j RETURN 2>/dev/null || true
+# Note: Custom bridge subnets (e.g., aegis_sandbox_net, aegis_net) are filtered by CIDR argument below.
 
 for SUBNET in "$@"; do
     echo "[+] Configuring DOCKER-USER iptables chain for subnet: ${SUBNET}"

@@ -22,15 +22,18 @@
 
 # -------------------------------------------------------
 # SHARED CONFIGURATION ANCHORS
-# -------------------------------------------------------
+# Common environment variables reused across all backend services
+x-common-env: &common-env
+  AEGIS_DB_PASSWORD: ${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+  REDIS_SECURITY_PASSWORD: ${REDIS_SECURITY_PASSWORD:-${REDIS_PASSWORD}}
+  REQUIRE_REAL_CERT: ${REQUIRE_REAL_CERT:-false}
+
 x-backend-common: &backend-common
   env_file:
     - ./backend/.env
   environment:
-    - AEGIS_DB_PASSWORD=${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
-    - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
-    - REDIS_SECURITY_PASSWORD=${REDIS_SECURITY_PASSWORD:-${REDIS_PASSWORD}}
-    - REQUIRE_REAL_CERT=${REQUIRE_REAL_CERT:-false}
+    <<: *common-env
   volumes:
     - shared_scans:/shared/scans
   # Python (FastAPI, Celery worker, Beat) requires read_only: false for runtime bytecode compilation
@@ -248,9 +251,13 @@ services:
 
   # ---------------------------------------------------
   # 5. DOCKER SOCKET PROXY — Scoped API gateway
-  #    Pinned repo:tag@digest — see change log at the top of this file
-  #    (DEVSECOPS_TODO #5) for why the previous line was invalid.
-  #    Note on transport: API calls inside docker_proxy_net are unencrypted over internal bridge network.
+  #    Pinned repo:tag@digest — see change log at the top of this file.
+  #    Scope note: Exposes CONTAINERS=1, IMAGES=1, and POST=1. This allows container creation,
+  #    start, stop, kill, and image inspection/pulling (POST /images/create).
+  #    Because tecnativa/docker-socket-proxy applies POST globally across enabled endpoints,
+  #    CONTAINERS=1 + POST=1 covers stop/kill on any container reachable on this daemon socket.
+  #    Security relies entirely on strict network isolation: ONLY aegis_sandbox_runner sits on
+  #    docker_proxy_net, and it is protected by non-root execution and X-Runner-Auth HMAC gating.
   # ---------------------------------------------------
   docker_socket_proxy:
     container_name: aegis_socket_proxy
@@ -370,10 +377,7 @@ services:
       --queues=default,sandbox,alerts
       --hostname=worker@%h
     environment:
-      AEGIS_DB_PASSWORD: ${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
-      REDIS_SECURITY_PASSWORD: ${REDIS_SECURITY_PASSWORD:-${REDIS_PASSWORD}}
-      REQUIRE_REAL_CERT: ${REQUIRE_REAL_CERT:-false}
+      <<: *common-env
       SANDBOX_RUNNER_URL: http://aegis_sandbox_runner:8002/detonate
       SANDBOX_RUNNER_SECRET: ${SANDBOX_RUNNER_SECRET:?SANDBOX_RUNNER_SECRET must be set in .env}
       CLAMAV_HOST: clamav

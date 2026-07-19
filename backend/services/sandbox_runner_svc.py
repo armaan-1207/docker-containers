@@ -137,14 +137,23 @@ async def verify_host_firewall_and_image():
         logger.debug("[startup] Could not verify SANDBOX_IMAGE presence via docker inspect: %s", e)
 
     try:
-        # Use SANDBOX_IMAGE for probe instead of busybox to ensure image availability
+        # Use SANDBOX_IMAGE with explicit --entrypoint=python3 override to bypass phishing_sandbox_scan.py entrypoint
+        probe_script = (
+            "import socket, sys\n"
+            "try:\n"
+            "    socket.create_connection(('169.254.169.254', 80), timeout=2)\n"
+            "    sys.exit(0)\n"
+            "except OSError:\n"
+            "    sys.exit(1)\n"
+        )
         cmd = [
             "docker", "run", "--rm",
+            "--entrypoint=python3",
             "--network", SANDBOX_NETWORK,
             "--cap-drop=ALL",
             "--security-opt", "no-new-privileges:true",
             SANDBOX_IMAGE,
-            "python3", "-c", "import socket; socket.create_connection(('169.254.169.254', 80), timeout=2)"
+            "-c", probe_script
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -163,15 +172,15 @@ async def verify_host_firewall_and_image():
             logger.error(msg)
             if is_prod:
                 raise RuntimeError(msg)
-        elif proc.returncode != 0 and proc.returncode < 125:
-            # Non-zero (< 125) means python ran inside container but could not connect (ConnectionRefused/Timeout)
-            logger.info("[startup] Host firewall / network isolation verified for %s (probe rejected with exit code %s)", SANDBOX_NETWORK, proc.returncode)
-        elif proc.returncode >= 125:
-            # 125=docker run failed, 126=cannot invoke, 127=command not found inside container
-            logger.warning("[startup] Active firewall probe skipped: docker container execution failed (return code %s): %s", proc.returncode, stderr_text)
+        elif proc.returncode == 1:
+            # Returncode 1 means python3 ran our probe script inside container and caught OSError (timeout/refused/no route)
+            logger.info("[startup] Host firewall / network isolation verified for %s (probe rejected connection with code 1)", SANDBOX_NETWORK)
+        elif proc.returncode >= 125 or proc.returncode > 1:
+            # 125=docker run failed, 126=cannot invoke, 127=command not found, >1=python runtime/arg parse error
+            logger.warning("[startup] Active firewall probe execution failed (return code %s): %s", proc.returncode, stderr_text)
             if is_prod:
                 raise RuntimeError(
-                    f"CRITICAL: Active firewall probe failed to execute inside container (return code {proc.returncode}): {stderr_text}. "
+                    f"CRITICAL: Active firewall probe failed to execute correctly inside container (return code {proc.returncode}): {stderr_text}. "
                     "Ensure 'make pin-sandbox' and 'sudo bash scripts/setup_host_firewall.sh' have run."
                 )
         else:

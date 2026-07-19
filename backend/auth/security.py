@@ -33,6 +33,15 @@ def _lockout_keys(email: str, client_ip: str = "") -> Tuple[str, str]:
 def check_account_lockout(email: str, client_ip: str = "") -> bool:
     """
     Returns True if account is currently locked out due to excessive failed login attempts.
+
+    Note on Architectural Trade-off (DoS vs Brute-Force):
+    Global account lockout (`login_global:{normalized_email}`) prevents distributed brute-force
+    attacks across rotating IPs. However, it can inherently be weaponized by an attacker as a
+    Denial-of-Service (DoS) against a known victim email address by intentionally triggering failed
+    logins from multiple IPs to hit the threshold. Recommended future mitigation roadmap:
+    incorporate behavioral backoff, per-IP throttling, or CAPTCHA validation prior to incrementing
+    global account lockout counters.
+
     Security finding #1 remediation: checks IP-scoped key first (e.g. 5 attempts per IP),
     and falls back to checking a global per-email counter at a higher threshold (25 attempts)
     to prevent single-email spam from locking out legitimate users on other IPs while stopping

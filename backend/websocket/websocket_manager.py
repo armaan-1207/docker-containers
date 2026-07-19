@@ -63,7 +63,7 @@ class WebSocketManager:
             logger.exception("[%s] error checking risk cache on browser connect, falling back to pubsub", scan_id)
 
         self._listen_tasks[f"browser:{scan_id}"] = asyncio.create_task(
-            self._forward_channel(_scan_channel(scan_id), websocket, one_shot=True, timeout_sec=300)
+            self._forward_channel(_scan_channel(scan_id), websocket, one_shot=True, timeout_sec=300, scan_id=scan_id)
         )
 
     def disconnect_browser(self, scan_id: str) -> None:
@@ -86,12 +86,11 @@ class WebSocketManager:
                 logger.warning("[%s] user exceeded global max websocket connections (%d), rejecting connection", user_id, settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER)
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Too many concurrent websocket connections")
                 return False
-        except Exception:
-            # Fallback to local worker check if Redis counter fails
-            if len(user_socks) >= settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER:
-                logger.warning("[%s] user exceeded local max websocket connections (%d), rejecting connection", user_id, settings.MAX_WEBSOCKET_CONNECTIONS_PER_USER)
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Too many concurrent websocket connections")
-                return False
+        except Exception as e:
+            # Fail-closed posture consistent with ClamAV/JWT/Lockout under Redis outage
+            logger.error("[%s] Redis connection check failed during WebSocket admission (%s); failing closed.", user_id, e)
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="Authentication backend unavailable")
+            return False
 
         user_socks.add(websocket)
         await self._update_worker_count(user_id, len(user_socks))
@@ -125,11 +124,30 @@ class WebSocketManager:
         logger.info("[%s] dashboard user disconnected", user_id)
 
     async def _forward_channel(
-        self, channel: str, websocket: WebSocket, one_shot: bool, timeout_sec: Optional[int] = None
+        self, channel: str, websocket: WebSocket, one_shot: bool, timeout_sec: Optional[int] = None, scan_id: Optional[str] = None
     ) -> None:
         pubsub = self._redis.pubsub()
         try:
             await pubsub.subscribe(channel)
+
+            if scan_id and one_shot:
+                # Double-check Redis/disk cache immediately after subscribing to close the TOCTOU gap
+                # where risk_fusion finished and published between our initial check and subscribe().
+                try:
+                    cached_data = await self._redis.get(f"risk:{scan_id}")
+                    if not cached_data:
+                        report_path = os.path.join(settings.SHARED_DIR, scan_id, "risk_report.json")
+                        if os.path.exists(report_path):
+                            def _read_file():
+                                with open(report_path, "r") as f:
+                                    return f.read()
+                            cached_data = await asyncio.to_thread(_read_file)
+                    if cached_data:
+                        logger.info("[%s] sending cached risk report immediately post-subscribe (TOCTOU gap closed)", scan_id)
+                        await websocket.send_text(cached_data)
+                        return
+                except Exception as e:
+                    logger.debug("[%s] post-subscribe cache check failed: %s", scan_id, e)
 
             async def _listen_loop():
                 async for message in pubsub.listen():
