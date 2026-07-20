@@ -302,20 +302,7 @@ Your extension should:
 
 5. **CORS** — Add your extension origin (`chrome-extension://<id>`) to `CORS_ALLOWED_ORIGINS` in `backend/.env`.
 
----
 
-## Verified Live Scans
-
-All four pipeline stages have been verified end-to-end against real URLs:
-
-| URL | Score | Severity | Sandbox Path |
-|---|---|---|---|
-| `github.com` *(allowlisted)* | 64 | HIGH* | Skipped → dummy fallback written |
-| `campus.thapar.edu` | 19 | SAFE | Full detonation (~10s) |
-| `cloudflare.com` | 32 | LOW | Timeout → graceful fallback |
-| `testsafebrowsing.appspot.com/s/phishing.html` | 28 | LOW | Full detonation |
-
-\* Score reflects placeholder ML model, not real risk. The trained model is the extension team's dependency.
 
 ---
 
