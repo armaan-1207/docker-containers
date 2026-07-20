@@ -69,6 +69,9 @@ except Exception as e:
     print(f"    -> FATAL: Authentication failed: {e}")
     sys.exit(1)
 
+target_url = args.url
+html_payload = f"<html><head><title>Test Page</title></head><body><h1>AEGIS test scan</h1><p>Scanning: {target_url}</p></body></html>"
+
 stage2_payload = json.dumps({
     'url': target_url,
     'screenshot_base64': screenshot_b64,

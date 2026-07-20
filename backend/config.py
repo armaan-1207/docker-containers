@@ -272,7 +272,7 @@ class Settings(BaseSettings):
     LOW_THRESHOLD: int = 40
     MEDIUM_THRESHOLD: int = 70
     HIGH_THRESHOLD: int = 85
-    SANDBOX_PRELIMINARY_THRESHOLD: int = 25
+    SANDBOX_PRELIMINARY_THRESHOLD: int = 0
     LOG_LEVEL: str = "INFO"
 
     # Trusted Domain Allowlist (`quickscan.py` finding #11)
