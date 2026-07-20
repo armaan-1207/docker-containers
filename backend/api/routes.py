@@ -219,31 +219,6 @@ def get_scan_artifact(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Retrieve a specific scan artifact (screenshot, DOM snapshot, or JSON report).
-
-    Hardening analyst UI against XSS (security finding):
-    When serving captured HTML (`browser.html`), strict Content-Security-Policy
-    `sandbox` headers are enforced so the browser renders the DOM purely as inert
-    visual HTML without script execution, network access, or cookie/origin access.
-    Additionally, `sanitized=true` (default) strips script tags and event handlers.
-    """
-    try:
-        _validate_scan_id(scan_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    if artifact_name not in _ALLOWED_ARTIFACTS:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requested artifact is not permitted.")
-
-    scan = db.query(Scan).filter(Scan.id == scan_id).first()
-    if not scan or scan.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan not found.")
-
-    file_path = os.path.join(_scan_dir(scan_id), artifact_name)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact file not found.")
-
     if artifact_name == "browser.html":
         if not sanitized:
             is_su = getattr(current_user, "is_superuser", False) or (

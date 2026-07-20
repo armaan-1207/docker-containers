@@ -274,14 +274,15 @@ def sandbox_analysis_task(self, scan_id: str):
             raise ValueError(f"Sandbox returned an error: {sandbox_result['error']}")
     except Exception as exc:
         logger.exception("[%s] Sandbox call failed", scan_id)
-        if self.request.retries < self.max_retries:
+        is_timeout = "504" in str(exc) or "timeout" in str(exc).lower()
+        if not is_timeout and self.request.retries < self.max_retries:
             _mark_status(scan_id, "sandbox_analysis_retrying")
             raise self.retry(exc=exc)
-        # Max retries exhausted — write a graceful fallback so the pipeline
+        # Timeout or max retries exhausted — write a graceful fallback so the pipeline
         # (consistency + risk_fusion) can still run with reduced confidence
         # rather than dead-ending with no verdict at all.
         logger.warning(
-            "[%s] Sandbox exhausted retries (%s), writing fallback sandbox_metadata.json "
+            "[%s] Sandbox timeout or retries exhausted, writing fallback sandbox_metadata.json "
             "and continuing pipeline with reduced confidence.",
             scan_id, self.max_retries,
         )

@@ -95,6 +95,8 @@ A URL submitted for deep analysis flows through these stages:
 
 > **Note on ML Model:** `risk_fusion.py` currently returns a random placeholder score. The `is_placeholder=True` flag suppresses all real alerts and Incident rows until the ML team wires in the trained LightGBM model. Everything else is real logic.
 
+> **Note on Sandbox Timeout:** Sandbox detonation times out after ~120s. On timeout (HTTP 504), the task immediately writes a graceful fallback `sandbox_metadata.json` (`sandbox_available: false`) and continues the pipeline at reduced confidence — no retries, no pipeline stall. Sites on the trusted allowlist also skip the sandbox and receive a dummy metadata file so downstream stages never crash.
+
 ---
 
 ## Scan Modes
@@ -170,6 +172,8 @@ python run_scan.py \
   --insecure \
   --url https://example.com/
 ```
+
+The script polls the database every 2 seconds for up to **300 seconds** — enough for complex sites (e.g. Cloudflare's bot-challenge pages) that take ~120s in the sandbox. A clear timeout message with the manual DB query is shown if the limit is ever exceeded.
 
 Or hit the Swagger UI at `https://localhost/docs` (only available when `DEBUG=true`).
 
@@ -297,6 +301,21 @@ Your extension should:
 4. **Auth** — All endpoints need `Authorization: Bearer <JWT>`. Get the token from `POST /api/auth/login`.
 
 5. **CORS** — Add your extension origin (`chrome-extension://<id>`) to `CORS_ALLOWED_ORIGINS` in `backend/.env`.
+
+---
+
+## Verified Live Scans
+
+All four pipeline stages have been verified end-to-end against real URLs:
+
+| URL | Score | Severity | Sandbox Path |
+|---|---|---|---|
+| `github.com` *(allowlisted)* | 64 | HIGH* | Skipped → dummy fallback written |
+| `campus.thapar.edu` | 19 | SAFE | Full detonation (~10s) |
+| `cloudflare.com` | 32 | LOW | Timeout → graceful fallback |
+| `testsafebrowsing.appspot.com/s/phishing.html` | 28 | LOW | Full detonation |
+
+\* Score reflects placeholder ML model, not real risk. The trained model is the extension team's dependency.
 
 ---
 

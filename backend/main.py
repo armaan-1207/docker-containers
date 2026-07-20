@@ -1,22 +1,5 @@
 """
-main.py
-========
 AEGIS FastAPI application entry point.
-
-Security hardening applied:
-  - Finding #16 (CORS): CORSMiddleware now uses an explicit allowlist
-    instead of the wildcard `allow_origins=["*"]` that was previously
-    recommended as a future TODO. Origins can be set via the
-    CORS_ALLOWED_ORIGINS environment variable (comma-separated) for
-    deployment flexibility. Defaults to the Chrome extension origin pattern.
-  - Finding #7 (WebSocket token in query string): JWT is no longer accepted
-    from the query string. The socket must connect unauthenticated and send
-    an {"type":"auth","token":"<JWT>"} frame within 3 seconds. If that frame
-    does not arrive in time, or the token is invalid, the socket is closed
-    with WS_1008_POLICY_VIOLATION. This prevents the token from appearing
-    in server access logs, proxy logs, and browser network histories.
-  - Debug endpoints (Swagger, ReDoc, openapi.json) are suppressed in
-    production (DEBUG=False) and only served when DEBUG=True.
 """
 
 import asyncio
@@ -97,8 +80,6 @@ async def _lifespan(app: FastAPI):
         hb_task.cancel()
 
 
-# ─── Application ────────────────────────────────────────────────────────────
-# Swagger/ReDoc disabled when is_production=True or DEBUG=False.
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG and not settings.is_production,
@@ -108,15 +89,6 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
-# ─── CORS — Security finding #16 fix ────────────────────────────────────────
-# Wildcard allow_origins=["*"] was the recommended TODO in the old code.
-# We now use an explicit origin allowlist.
-#
-# CORS_ALLOWED_ORIGINS in .env should be a comma-separated list, e.g.:
-#   CORS_ALLOWED_ORIGINS=chrome-extension://abcdefg123456,https://yourdomain.com
-#
-# The Chrome extension origin (chrome-extension://<id>) is always needed.
-# For local dev, also add http://localhost and https://localhost.
 _raw_origins = getattr(settings, "CORS_ALLOWED_ORIGINS", "") or ""
 _allowed_origins: list[str] = [
     o.strip() for o in _raw_origins.split(",") if o.strip()
@@ -224,22 +196,7 @@ def root() -> HealthCheckResponse:
     return HealthCheckResponse(service=settings.APP_NAME)
 
 
-# ─── WebSocket auth helper ────────────────────────────────────────────────────
-_WS_AUTH_TIMEOUT_SECONDS = 3.0  # client must send auth frame within this many seconds
-
-
 async def _ws_frame_auth(websocket: WebSocket) -> Optional[str]:
-    """
-    Perform frame-based WebSocket authentication (security finding #7 fix).
-
-    The client must send {"type": "auth", "token": "<JWT>"} as its very first
-    message within _WS_AUTH_TIMEOUT_SECONDS seconds. If it does not, or the
-    token is invalid, we return None (caller closes the socket).
-
-    This replaces the old pattern of reading the JWT from
-    websocket.query_params.get("token"), which caused the token to appear
-    in server access logs, nginx logs, proxy logs, and browser network panels.
-    """
     try:
         raw = await asyncio.wait_for(
             websocket.receive_text(),
@@ -293,13 +250,8 @@ async def _ws_frame_auth(websocket: WebSocket) -> Optional[str]:
     return user_id
 
 
-# ─── WebSocket: per-scan channel ─────────────────────────────────────────────
 @app.websocket("/ws/scan/{scan_id}")
 async def ws_scan(websocket: WebSocket, scan_id: str):
-    """
-    Real-time channel for a specific scan result.
-    Security: frame-based auth (no query-string token).
-    """
     await websocket.accept()
 
     authenticated_user_id = await _ws_frame_auth(websocket)
@@ -324,13 +276,8 @@ async def ws_scan(websocket: WebSocket, scan_id: str):
         websocket_manager.disconnect_browser(scan_id)
 
 
-# ─── WebSocket: per-user dashboard channel ───────────────────────────────────
 @app.websocket("/ws/user/{user_id}")
 async def ws_user(websocket: WebSocket, user_id: str):
-    """
-    Real-time dashboard channel for a user (receives all their scan updates).
-    Security: frame-based auth (no query-string token).
-    """
     await websocket.accept()
 
     authenticated_user_id = await _ws_frame_auth(websocket)

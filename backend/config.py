@@ -3,35 +3,6 @@ config.py
 ==========
 Central settings for the AEGIS backend. All values are loaded from
 environment variables (or the backend/.env file via pydantic-settings).
-
-Key security notes:
-  - SECRET_KEY must be set to a unique 32+ char random value in production.
-    The startup guard below raises RuntimeError if the placeholder value is
-    detected at DEBUG=False.
-  - REDIS_URL must include the password when Redis is password-protected
-    (format: redis://:PASSWORD@host:port/db). The validator below injects
-    REDIS_PASSWORD into the URL if it is not already present.
-  - DATABASE_URL's password is now derived from AEGIS_DB_PASSWORD the same
-    way (see "Database" section below) -- this fixes a real deployment
-    bug: AEGIS_DB_PASSWORD (root .env, used by postgres/init.sh to create
-    the aegis_user role) and DATABASE_URL's embedded password (backend/.env,
-    a separate file) had to be kept in sync BY HAND with no passthrough
-    connecting them, and no validation catching drift. A backend/.env
-    written before -- or independently of -- the root .env silently
-    authenticates with the wrong password: Postgres itself starts fine,
-    the backend/Celery containers just can't log in, surfacing as
-    `password authentication failed for user "aegis_user"` in a loop,
-    forever, with the container marked unhealthy and every dependent
-    service refusing to start. docker-compose.yml now passes
-    AEGIS_DB_PASSWORD through to backend/celery_worker/celery_beat as a
-    real environment variable (not just env_file), and the validator
-    below makes it authoritative over whatever backend/.env's DATABASE_URL
-    happens to contain -- there is now exactly one place this password is
-    actually set (root .env), not two.
-  - CORS_ALLOWED_ORIGINS should list Chrome extension origins and any
-    dashboard domains — never use the wildcard "*" in production.
-  - ARTIFACT_RETENTION_DAYS controls how long scan artifacts are kept on
-    disk before the hourly file_cleanup task purges them (finding #8).
 """
 
 import logging

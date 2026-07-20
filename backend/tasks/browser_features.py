@@ -139,11 +139,25 @@ def browser_features_task(self, scan_id: str):
             logger.info("[%s] Preliminary score %s >= %s — dispatching sandbox", scan_id, preliminary_score, threshold)
             sandbox_analysis_task.delay(scan_id)
         except Exception:
-            logger.exception("[%s] Failed to dispatch sandbox_analysis_task", scan_id)
-            _mark_status(scan_id, "sandbox_analysis_dispatch_failed")
+            logger.exception("[%s] Failed to dispatch sandbox task", scan_id)
+            _mark_status(scan_id, "browser_features_failed")
     else:
+        logger.info("[%s] Skipping sandbox (allowlisted=%s score=%s) — dispatching consistency directly", 
+                    scan_id, allowlisted, preliminary_score)
+        
+        # Write a dummy sandbox_metadata.json so downstream tasks don't crash
+        dummy_meta = {
+            "sandbox_available": False,
+            "error": "Skipped due to allowlist or low preliminary score",
+            "dom_phash": None,
+            "suspicious_eval": False,
+            "suspicious_downloads": False,
+            "hidden_iframes": 0
+        }
+        with open(os.path.join(scan_dir, "sandbox_metadata.json"), "w") as f:
+            json.dump(dummy_meta, f)
+            
         try:
-            logger.info("[%s] Skipping sandbox (allowlisted=%s score=%s) — dispatching consistency directly", scan_id, allowlisted, preliminary_score)
             consistency_task.delay(scan_id)
         except Exception:
             logger.exception("[%s] Failed to dispatch consistency_task", scan_id)

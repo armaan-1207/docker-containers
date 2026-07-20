@@ -97,9 +97,14 @@ except Exception as e:
     sys.exit(1)
 
 # 4. Track progression
-print(f"\n[4] Tracking progression of stages across Celery workers...")
+# Polls every 2s for up to 300s (150 iterations). Sandbox detonation can take
+# up to ~120s for complex sites (e.g. Cloudflare bot-challenge pages), so a
+# generous 300s window ensures the script never times out before the pipeline finishes.
+MAX_POLL_SECONDS = 300
+POLL_INTERVAL = 2
+print(f"\n[4] Tracking progression of stages across Celery workers (timeout: {MAX_POLL_SECONDS}s)...")
 start_time = time.time()
-for _ in range(18):
+for _ in range(MAX_POLL_SECONDS // POLL_INTERVAL):
     status_query = [
         "docker", "exec", "-u", "postgres", "aegis_postgres",
         "psql", "-d", "aegis_db", "-t",
@@ -110,17 +115,22 @@ for _ in range(18):
     current_status = parts[0] if parts else "unknown"
     score = parts[1] if len(parts) > 1 else ""
     sev = parts[2] if len(parts) > 2 else ""
-    
+
     elapsed = int(time.time() - start_time)
-    print(f"    [{elapsed:02d}s] Status: {current_status:<25} | score: {score:<6} | severity: {sev}")
-    
+    print(f"    [{elapsed:03d}s] Status: {current_status:<25} | score: {score:<6} | severity: {sev}")
+
     if current_status == "risk_fusion_done":
         print(f"\n[+] Pipeline completed successfully with final status: {current_status}")
         break
     elif current_status.endswith("_failed") or current_status.startswith("failed") or current_status in ["error", "risk_fusion_failed", "sandbox_analysis_failed"]:
         print(f"\n[-] Pipeline aborted with terminal failure status: {current_status}")
         break
-    time.sleep(2)
+    time.sleep(POLL_INTERVAL)
+else:
+    elapsed = int(time.time() - start_time)
+    print(f"\n[!] Polling timed out after {elapsed}s — pipeline may still be running.")
+    print(f"    Check DB manually: docker exec -u postgres aegis_postgres psql -d aegis_db -t -c \"SELECT status, risk_score, severity FROM scans WHERE id = '{scan_id}';\"")
+
 
 print("\n[5] Inspecting generated analysis artifacts in /shared/scans/{scan_id}...")
 files_list = run_cmd(["docker", "exec", "aegis_celery_worker", "ls", "-la", f"/shared/scans/{scan_id}"])

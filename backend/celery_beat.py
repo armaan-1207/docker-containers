@@ -19,15 +19,7 @@ Registered task names (must match @celery.task(name=...) in tasks/):
     "tasks.file_cleanup"   ← NEW (finding #8 fix)
     "tasks.db_backup"      ← NEW (Finding #6 fix)
 
-Security fix (finding #8):
-  The previous beat_schedule was empty ({}) which meant scan artifacts
-  (browser.png, browser.html, sandbox.png, *.json) would accumulate on
-  the shared_scans volume indefinitely. With enough scans this would hit
-  100% disk usage, corrupting databases and causing a platform-wide
-  outage. The hourly file_cleanup task purges per-scan subdirectories
-  older than ARTIFACT_RETENTION_DAYS (default: 14 days) and also removes
-  any orphaned root-level scan_*.json / scan_*.png files left behind by
-  crashed mid-scan jobs.
+
 """
 
 from celery import Celery
