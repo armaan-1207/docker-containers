@@ -4,11 +4,22 @@
 # Only this container receives DOCKER_HOST access (`docker_proxy_net`).
 # ==============================================================================
 
+# --- CLI-only stage: pull the official static docker client binary ---
+# Using Docker's own published CLI image instead of Debian's docker.io
+# package -- this runner only ever talks to a REMOTE daemon over
+# DOCKER_HOST=tcp://docker_socket_proxy:2375, so it never needs
+# containerd, runc, dockerd, or iptables, all of which docker.io drags
+# in as dependencies for a local daemon this container will never run.
+FROM docker:26-cli AS dockercli
+
 FROM python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl docker.io \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy just the docker CLI binary from the official image above.
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 
 COPY requirements.runner.txt /tmp/requirements.runner.txt
 RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.runner.txt && rm /tmp/requirements.runner.txt
