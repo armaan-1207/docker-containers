@@ -333,16 +333,10 @@ Your extension should:
 ├── aegis.ps1
 ├── docker-compose.prod.yml
 ├── docker-compose.yml
-├── DOCKER_ARCHITECTURE_IDEATION.md
 ├── Makefile
-├── PROJECT_DOCUMENTATION.md
 ├── README.md
 ├── renovate.json
 ├── run_scan.py
-├── SECURITY.md
-├── .kiro/
-│   └── specs/
-│       └── deployment-readiness/
 ├── backend/
 │   ├── .dockerignore
 │   ├── .env
