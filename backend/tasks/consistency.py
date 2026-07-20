@@ -80,7 +80,16 @@ def consistency_task(self, scan_id: str):
         browser_features_data = _load_json(os.path.join(scan_dir, "browser_features.json"))
         browser_png   = os.path.join(scan_dir, "browser.png")
         browser_html  = os.path.join(scan_dir, "browser.html")
-        sandbox_meta  = _load_json(os.path.join(scan_dir, "sandbox_metadata.json"))
+
+        # Load Sandbox DOM hash
+        try:
+            sandbox_meta  = _load_json(os.path.join(scan_dir, "sandbox_metadata.json"))
+            sandbox_available = sandbox_meta.get("sandbox_available", True)
+        except (FileNotFoundError, json.JSONDecodeError):
+            logger.warning("[%s] sandbox_metadata.json missing (likely sandbox skipped or crashed)", scan_id)
+            sandbox_meta = {}
+            sandbox_available = False
+
         sandbox_png   = os.path.join(scan_dir, "sandbox.png")
 
         # Bug fix: the sandbox container never writes sandbox.html.

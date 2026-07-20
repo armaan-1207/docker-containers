@@ -267,17 +267,43 @@ def sandbox_analysis_task(self, scan_id: str):
     except OSError:
         pass
 
+    sandbox_result = None
     try:
         sandbox_result = _call_sandbox(scan_id)
         if sandbox_result.get("error"):
             raise ValueError(f"Sandbox returned an error: {sandbox_result['error']}")
     except Exception as exc:
         logger.exception("[%s] Sandbox call failed", scan_id)
-        if self.request.retries >= self.max_retries:
-            _mark_status(scan_id, "sandbox_analysis_failed")
-        else:
+        if self.request.retries < self.max_retries:
             _mark_status(scan_id, "sandbox_analysis_retrying")
-        raise self.retry(exc=exc)
+            raise self.retry(exc=exc)
+        # Max retries exhausted — write a graceful fallback so the pipeline
+        # (consistency + risk_fusion) can still run with reduced confidence
+        # rather than dead-ending with no verdict at all.
+        logger.warning(
+            "[%s] Sandbox exhausted retries (%s), writing fallback sandbox_metadata.json "
+            "and continuing pipeline with reduced confidence.",
+            scan_id, self.max_retries,
+        )
+        sandbox_result = {
+            "error": str(exc),
+            "sandbox_available": False,
+            "network_requests": [],
+            "screenshots": {},
+            "dom": {},
+        }
+        fallback_path = os.path.join(scan_dir, "sandbox_metadata.json")
+        with open(fallback_path, "w") as _f:
+            json.dump(sandbox_result, _f, indent=2, default=str)
+        _mark_status(scan_id, "sandbox_analysis_failed")
+        # Continue the pipeline with reduced confidence — consistency and
+        # risk_fusion still run, they handle sandbox_available=False gracefully.
+        from tasks.consistency import consistency_task
+        try:
+            consistency_task.delay(scan_id)
+        except Exception:
+            logger.exception("[%s] Failed to dispatch consistency_task after sandbox fallback", scan_id)
+        return {"scan_id": scan_id, "status": "sandbox_analysis_failed_gracefully"}
 
     source_json_path = sandbox_result.pop("_source_json_path", None)
 

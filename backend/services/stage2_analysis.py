@@ -20,12 +20,14 @@ Security hardening (finding #10):
 import base64
 import binascii
 import io
+import json
 import logging
 import os
 import re
 
 from fastapi import HTTPException, status
 from PIL import Image, UnidentifiedImageError
+from cyberintel.runner import run_cyberintel
 
 # High #4 fix: Cap total image pixels to prevent decompression bombs across Pillow decodes
 Image.MAX_IMAGE_PIXELS = 25_000_000  # 5,000 x 5,000 px limit (~100MB max RGBA memory)
@@ -142,9 +144,6 @@ def run_stage2_analysis(payload: Stage2Request, user, db) -> Stage2Response:
         pass
 
     # ── CyberIntel Early Gate ─────────────────────────────────────────────
-    from cyberintel.runner import run_cyberintel
-    import json
-    
     try:
         cyberintel = run_cyberintel(url)
         iocs = cyberintel.get("iocs", [])

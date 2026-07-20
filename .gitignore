@@ -1,24 +1,68 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+htmlcov/
+.coverage
+.coverage.*
+*.egg-info/
+dist/
+build/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Environment / secrets ──────────────────────────────────────────────────────
 .env
 backend/.env
 *.env.local
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
-.DS_Store
-Thumbs.db
+
+# ── ML Models ─────────────────────────────────────────────────────────────────
 models/*.pkl
 models/*.joblib
+
+# ── Celery ────────────────────────────────────────────────────────────────────
 celerybeat-schedule
 celerybeat.pid
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 logs/
 
-# Sensitive data and certificates
+# ── Certificates & keys ────────────────────────────────────────────────────────
 *.pem
 *.key
 *.p12
+nginx/certs/*.crt
+nginx/certs/*.key
+
+# ── Database dumps ────────────────────────────────────────────────────────────
 *.sqlite3
 *.sql
 *.dump
+
+# ── OS generated ──────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

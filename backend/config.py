@@ -245,7 +245,7 @@ class Settings(BaseSettings):
     INCIDENT_RETENTION_DAYS: int = 365
 
     SANDBOX_NETWORK: Optional[str] = "aegis_sandbox_net"
-    SANDBOX_IMAGE: str = "aegis-sandbox@sha256:fd0adf42be3bdd40f629e79b2477d52089c775b26c37d2294899e37406a9593a"
+    SANDBOX_IMAGE: str = "aegis-sandbox@sha256:6a132eb6c9155b0e0b2df6d680b061fe570db4fa57ebd06579484717d038d767"
     SANDBOX_RUNNER_SECRET: str = ""
     SHARED_SCANS_VOLUME: Optional[str] = "aegis_shared_scans"
     SANDBOX_TIMEOUT_SEC: int = 120
