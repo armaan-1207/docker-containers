@@ -5,7 +5,7 @@
 # DevSecOps Hardening (Finding #1):
 #   - In dev (docker-compose.yml), /etc/nginx/certs is mounted as tmpfs for self-signed certificates.
 #   - In production when REQUIRE_REAL_CERT=true, real TLS certificates from the host must be mounted.
-#   - This overlay mounts ./nginx/certs from the host and resets tmpfs without /etc/nginx/certs
+#   - This overlay mounts ./containers/nginx/certs from the host and resets tmpfs without /etc/nginx/certs
 #     to avoid mount conflicts between tmpfs and read-only bind mounts.
 # =======================================================
 
@@ -14,7 +14,7 @@ services:
     environment:
       - REQUIRE_REAL_CERT=true
     volumes:
-      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./containers/nginx/certs:/etc/nginx/certs:ro
     tmpfs: !reset
       - /var/cache/nginx:rw,noexec,nosuid,size=64m
       - /var/run:rw,noexec,nosuid,size=16m

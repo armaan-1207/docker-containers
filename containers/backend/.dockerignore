@@ -1,0 +1,48 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env.local
+
+# Local IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Tests
+tests/
+pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+
+# Logs
+*.log
+logs/
+
+# Models (add them via separate COPY or volume in prod)
+models/*.pkl
+models/*.joblib
+
+# Celery beat schedule
+celerybeat-schedule
+celerybeat.pid
+.env

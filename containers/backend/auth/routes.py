@@ -1,0 +1,202 @@
+"""
+auth/routes.py
+================
+Authentication endpoints: register and login.
+
+
+"""
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+
+from auth.jwt import create_access_token, revoke_token
+from auth.dependencies import oauth2_scheme
+from auth.security import (
+    hash_password,
+    verify_password,
+    verify_password_with_migration,
+    check_account_lockout,
+    record_failed_login,
+    reset_failed_login,
+    check_pwned_password,
+    record_legacy_bcrypt_metric,
+)
+from database.database import get_db
+from database.models import User
+from schemas.auth import TokenResponse, UserRegisterRequest, UserRegisterAcceptedResponse
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# ─── Pre-computed dummy hash ────────────────────────────────────────────────
+# Always run verify_password() against this hash when the looked-up user is
+# None. bcrypt takes the same wall-clock time regardless of whether the user
+# exists, so an attacker cannot enumerate valid accounts by measuring response
+# latency.
+#
+# The hash is for the string "dummy-password-that-will-never-match" and was
+# generated once with hash_password(). It never changes at runtime; it exists
+# only to ensure the bcrypt work-factor is always paid.
+_DUMMY_HASH: str = hash_password("dummy-password-aegis-timing-guard-v1")
+
+
+@router.post(
+    "/register",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=UserRegisterAcceptedResponse,
+)
+def register(
+    payload: UserRegisterRequest,
+    db: Session = Depends(get_db),
+) -> UserRegisterAcceptedResponse:
+    """
+    Register a new account.
+
+    Always returns 202 Accepted with a generic message — never 409
+    Conflict — so that unauthenticated callers cannot determine whether a
+    given email address already exists in the system.
+    """
+    try:
+        if check_pwned_password(payload.password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password has appeared in public data breaches (k-anonymity HIBP check). Please choose a unique, unbreached password.",
+            )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        )
+
+    email = (payload.email or "").lower().strip()
+    existing = db.query(User).filter(User.email == email).first()
+
+    # Always pay the bcrypt cost -- whether or not this email is already
+    # registered -- so response timing cannot be used to distinguish the
+    # two outcomes. The computed hash is simply discarded on the
+    # duplicate-email path.
+    hashed_password = hash_password(payload.password)
+
+    if existing is not None:
+        # Do NOT reveal that this email is already registered.
+        # Return the same 202 shape so callers cannot tell the difference,
+        # and (as of this fix) take the same amount of time to do it.
+        logger.info("Registration attempted for existing email (returning 202 to caller)")
+        return UserRegisterAcceptedResponse()
+
+    user = User(
+        email=email,
+        hashed_password=hashed_password,
+    )
+    db.add(user)
+    db.commit()
+    logger.info("New user registered: %s", email)
+    return UserRegisterAcceptedResponse()
+
+
+@router.post("/login", response_model=TokenResponse)
+def login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    """
+    Authenticate and return a JWT access token.
+
+    Timing-attack mitigation:
+    verify_password_with_migration() is called unconditionally. When the user is not
+    found we compare against _DUMMY_HASH, ensuring the bcrypt work-factor
+    is always paid and response time does not leak whether the email exists.
+    """
+    email = (form_data.username or "").lower().strip()
+    client_ip = request.client.host if request.client else None
+    try:
+        if check_account_lockout(email, client_ip):
+            logger.warning("Login blocked for locked account: %s", email)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Account temporarily locked due to excessive failed login attempts. Please try again later.",
+            )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable",
+        )
+
+    user = db.query(User).filter(User.email == email).first()
+
+    # Always run the password hash comparison — even when user is None —
+    # so the response time is identical regardless of whether the account
+    # exists. The result of the comparison is only used when user is not None.
+    password_hash_to_check = user.hashed_password if user is not None else _DUMMY_HASH
+    password_valid, needs_rehash = verify_password_with_migration(form_data.password, password_hash_to_check)
+
+    invalid_credentials = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Incorrect email or password",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    if user is None or not password_valid:
+        record_failed_login(email, client_ip)
+        raise invalid_credentials
+
+    # is_active check BEFORE resetting lockout counters — an inactive user
+    # with a known correct password must not be able to reset their lockout
+    # counter (which would give them unlimited brute-force attempts once they
+    # somehow become active again, and leaks that their password is correct).
+    if hasattr(user, "is_active") and not user.is_active:
+        # Return 401 (not 400) to avoid leaking that the account exists
+        # and that the correct password was supplied.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    reset_failed_login(email, client_ip)
+
+    # Automatic hash rotation: upgrade legacy hash to SHA-256 pre-hashed format on successful login
+    if needs_rehash:
+        record_legacy_bcrypt_metric()
+        user.hashed_password = hash_password(form_data.password)
+        db.commit()
+        logger.warning(
+            "[Legacy Bcrypt Alert] User %s authenticated via legacy truncated bcrypt path. "
+            "Upgraded hash automatically. Monitor metric to disable ALLOW_LEGACY_BCRYPT once zero.",
+            user.email,
+        )
+
+    access_token = create_access_token(data={"sub": user.id})
+    return TokenResponse(access_token=access_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    token: str = Depends(oauth2_scheme),
+) -> Response:
+    """
+    Revoke the current JWT bearer token.
+    Adds the token's jti to the Redis blacklist with a TTL matching the token expiration.
+    """
+    revoke_token(token)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_501_NOT_IMPLEMENTED)
+def request_password_reset():
+    """
+    Password reset / account recovery endpoint placeholder.
+
+    For an internal analyst tool, user registration and credentials are managed by admins.
+    For customer-facing production deployments, integrate an out-of-band email delivery service
+    (e.g., AWS SES or SendGrid) here to generate and email a time-bounded, single-use reset JWT.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Password reset requires email gateway integration in production.",
+    )

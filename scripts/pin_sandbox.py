@@ -21,8 +21,8 @@ def run(cmd):
 def main():
     print(f"[pin-sandbox] Building {IMAGE_NAME} from ./sandbox/docker/Dockerfile...")
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    dockerfile = os.path.join(root_dir, "sandbox", "docker", "Dockerfile")
-    context = os.path.join(root_dir, "sandbox")
+    dockerfile = os.path.join(root_dir, "containers", "sandbox", "docker", "Dockerfile")
+    context = os.path.join(root_dir, "containers")
     
     try:
         subprocess.check_call(["docker", "build", "-t", IMAGE_NAME, "-f", dockerfile, context])
@@ -83,8 +83,8 @@ def main():
     code_targets = [
         (os.path.join(root_dir, "docker-compose.yml"), rf'(SANDBOX_IMAGE:\s*\$\{{SANDBOX_IMAGE:-){_digest_pattern}(\}})', rf'\g<1>{digest}\g<2>'),
         (os.path.join(root_dir, "docker-compose.yml"), rf'(image:\s*\$\{{SANDBOX_IMAGE:-){_digest_pattern}(\}})', rf'\g<1>{digest}\g<2>'),
-        (os.path.join(root_dir, "backend", "config.py"), rf'(SANDBOX_IMAGE:\s*str\s*=\s*"){_digest_pattern}(")', rf'\g<1>{digest}\g<2>'),
-        (os.path.join(root_dir, "backend", "services", "sandbox_runner_svc.py"), rf'("SANDBOX_IMAGE",\s*"){_digest_pattern}(")', rf'\g<1>{digest}\g<2>')
+        (os.path.join(root_dir, "containers", "backend", "config.py"), rf'(SANDBOX_IMAGE:\s*str\s*=\s*"){_digest_pattern}(")', rf'\g<1>{digest}\g<2>'),
+        (os.path.join(root_dir, "containers", "backend", "services", "sandbox_runner_svc.py"), rf'("SANDBOX_IMAGE",\s*"){_digest_pattern}(")', rf'\g<1>{digest}\g<2>')
     ]
     for target_path, pattern, repl in code_targets:
         if os.path.exists(target_path):

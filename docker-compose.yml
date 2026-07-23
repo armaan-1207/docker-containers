@@ -31,11 +31,11 @@ x-common-env: &common-env
 
 x-backend-common: &backend-common
   env_file:
-    - ./backend/.env
+    - ./.env
   environment:
     <<: *common-env
   volumes:
-    - shared_scans:/shared/scans
+    - ./shared/scans:/shared/scans
   # Python (FastAPI, Celery worker, Beat) requires read_only: false for runtime bytecode compilation
   # (__pycache__) across dynamic module loads and Celery Beat schedule database synchronization.
   # Hardening is enforced via non-root execution (UID 1001), cap_drop: [ALL], and no-new-privileges: true.
@@ -82,7 +82,7 @@ services:
   nginx:
     container_name: aegis_nginx
     build:
-      context: ./nginx
+      context: ./containers/nginx
       dockerfile: Dockerfile
     ports:
       - "80:80"
@@ -121,7 +121,7 @@ services:
   backend:
     <<: *backend-common
     build:
-      context: ./backend
+      context: ./containers/backend
       dockerfile: Dockerfile
     container_name: aegis_backend
     command: >
@@ -222,7 +222,7 @@ services:
       AEGIS_DB_PASSWORD: ${AEGIS_DB_PASSWORD:?AEGIS_DB_PASSWORD must be set in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./postgres/init.sh:/docker-entrypoint-initdb.d/01_init.sh:ro
+      - ./containers/postgres/init.sh:/docker-entrypoint-initdb.d/01_init.sh:ro
     networks:
       - aegis_net
     expose:
@@ -336,7 +336,7 @@ services:
   # ---------------------------------------------------
   aegis_sandbox_runner:
     build:
-      context: ./backend
+      context: ./containers/backend
       dockerfile: Dockerfile.runner
     container_name: aegis_sandbox_runner
     environment:
@@ -380,11 +380,11 @@ services:
   celery_worker:
     <<: *backend-common
     build:
-      context: ./backend
+      context: ./containers/backend
       dockerfile: Dockerfile.worker
     container_name: aegis_celery_worker
     volumes:
-      - shared_scans:/shared/scans
+      - ./shared/scans:/shared/scans
       - db_backups:/backups
     networks:
       - aegis_net          # Postgres, Redis, aegis_sandbox_runner
@@ -435,7 +435,7 @@ services:
   celery_beat:
     <<: [*backend-common,  *default-resources]
     build:
-      context: ./backend
+      context: ./containers/backend
       dockerfile: Dockerfile.worker
     container_name: aegis_celery_beat
     depends_on:
@@ -452,7 +452,7 @@ services:
       --scheduler celery.beat:PersistentScheduler
       --schedule /app/celerybeat-schedule/celerybeat-schedule
     volumes:
-      - shared_scans:/shared/scans
+      - ./shared/scans:/shared/scans
       - celery_beat_data:/app/celerybeat-schedule
     healthcheck:
       test: ["CMD-SHELL", "test -f /app/celerybeat-schedule/celerybeat-schedule"]
@@ -528,8 +528,8 @@ services:
   sandbox:
     container_name: aegis_sandbox
     build:
-      context: ./sandbox
-      dockerfile: docker/Dockerfile
+      context: ./containers
+      dockerfile: sandbox/docker/Dockerfile
     image: ${SANDBOX_DEBUG_IMAGE:-aegis-sandbox:local}
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -541,7 +541,7 @@ services:
     # microservice (POST /detonate), which dynamically isolates each scan using `--mount
     # type=volume,source=shared_scans,target=/app/output,volume-subpath=<scan_id>`.
     volumes:
-      - shared_scans:/app/output
+      - ./shared/scans:/app/output
     networks:
       - sandbox_net
     cap_drop:
@@ -572,9 +572,6 @@ services:
 # VOLUMES
 # -------------------------------------------------------
 volumes:
-  shared_scans:
-    driver: local
-    name: aegis_shared_scans
   postgres_data:
     driver: local
     name: aegis_postgres_data

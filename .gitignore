@@ -1,4 +1,4 @@
-# ── Python ────────────────────────────────────────────────────────────────────
+# ── Python & Caching ───────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
@@ -15,42 +15,55 @@ htmlcov/
 dist/
 build/
 
-# ── Virtual environments ───────────────────────────────────────────────────────
+# ── Virtual Environments ──────────────────────────────────────────────────────
 .venv/
 venv/
 env/
 ENV/
 
-# ── Environment / secrets ──────────────────────────────────────────────────────
+# ── Environment & Secrets ─────────────────────────────────────────────────────
 .env
-backend/.env
+*.env
 *.env.local
+containers/backend/.env
 
-# ── ML Models ─────────────────────────────────────────────────────────────────
-models/*.pkl
-models/*.joblib
-
-# ── Celery ────────────────────────────────────────────────────────────────────
-celerybeat-schedule
-celerybeat.pid
-
-# ── Logs ──────────────────────────────────────────────────────────────────────
-*.log
-logs/
-
-# ── Certificates & keys ────────────────────────────────────────────────────────
+# ── Certificates & Keys ───────────────────────────────────────────────────────
 *.pem
 *.key
 *.p12
-nginx/certs/*.crt
-nginx/certs/*.key
+containers/nginx/certs/*.crt
+containers/nginx/certs/*.key
 
-# ── Database dumps ────────────────────────────────────────────────────────────
+# ── Database Dumps & ML Models ────────────────────────────────────────────────
 *.sqlite3
 *.sql
 *.dump
+containers/backend/models/*.pkl
+containers/backend/models/*.joblib
 
-# ── OS generated ──────────────────────────────────────────────────────────────
+# ── AEGIS Shared Storage Volumes ──────────────────────────────────────────────
+shared/scans/*
+shared/emails/*
+shared/files/*
+!.gitkeep
+
+# ── Celery & Logs ─────────────────────────────────────────────────────────────
+celerybeat-schedule
+celerybeat.pid
+*.log
+logs/
+
+# ── Frontend & Web Tools ──────────────────────────────────────────────────────
+node_modules/
+.next/
+.vercel/
+.v0-trash/
+.snowflake/
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+
+# ── OS & IDE Generated ────────────────────────────────────────────────────────
 .DS_Store
 .DS_Store?
 ._*
@@ -59,8 +72,6 @@ nginx/certs/*.key
 Thumbs.db
 ehthumbs.db
 Desktop.ini
-
-# ── IDE ───────────────────────────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
